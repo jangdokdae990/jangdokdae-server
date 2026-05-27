@@ -3,7 +3,7 @@ import json
 import logging
 from datetime import datetime
 
-from langgraph.graph import StateGraph
+from langgraph.graph import END, StateGraph
 
 from app.llm.chains import (
     EntityExtractionChain,
@@ -40,7 +40,7 @@ class NewsAnalysisGraph:
         workflow.add_edge("filter", "extract_entities")
         workflow.add_edge("extract_entities", "analyze_impact")
         workflow.add_edge("analyze_impact", "generate_explanation")
-        workflow.set_finish_point("generate_explanation")
+        workflow.add_edge("generate_explanation", END)
 
         return workflow.compile()
 
