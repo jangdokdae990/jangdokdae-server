@@ -3,7 +3,7 @@ import json
 import logging
 from typing import Any
 
-from langchain_google_vertexai import VertexAI
+from langchain_google_vertexai import ChatVertexAI
 
 from app.config import settings
 from app.llm.prompt_loader import PromptLoader
@@ -19,11 +19,11 @@ class BaseLLMChain:
         self.prompt_name = prompt_name
         self.prompt_data = self.prompt_loader.load(prompt_name)
 
-        # Vertex AI 클라이언트 초기화
-        self.llm = VertexAI(
+        # Vertex AI 클라이언트 초기화 (langchain-google-vertexai 3.x)
+        self.llm = ChatVertexAI(
             project=settings.VERTEX_AI_PROJECT_ID,
             location=settings.VERTEX_AI_LOCATION,
-            model_name=self.prompt_data.get("model", settings.VERTEX_AI_MODEL),
+            model=self.prompt_data.get("model", settings.VERTEX_AI_MODEL),
             temperature=self.prompt_data.get("temperature", 0.7),
             max_output_tokens=self.prompt_data.get("max_tokens", 1000),
         )
@@ -62,7 +62,7 @@ class NewsExplanationChain(BaseLLMChain):
         )
 
         try:
-            response = self.llm.invoke(prompt)
+            response = self.llm.invoke(prompt).content
             logger.info("뉴스 해설 생성 완료")
             return response
         except Exception as e:
@@ -97,7 +97,7 @@ class EntityExtractionChain(BaseLLMChain):
         prompt = self._format_prompt(news_content=news_content)
 
         try:
-            response = self.llm.invoke(prompt)
+            response = self.llm.invoke(prompt).content
 
             # JSON 파싱 시도
             try:
@@ -158,7 +158,7 @@ class ImpactAnalysisChain(BaseLLMChain):
         )
 
         try:
-            response = self.llm.invoke(prompt)
+            response = self.llm.invoke(prompt).content
 
             # JSON 파싱 시도
             try:
@@ -215,7 +215,7 @@ class FilterChain(BaseLLMChain):
         )
 
         try:
-            response = self.llm.invoke(prompt)
+            response = self.llm.invoke(prompt).content
 
             # JSON 파싱 시도
             try:
