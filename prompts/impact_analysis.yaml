@@ -1,0 +1,40 @@
+name: "impact_analysis"
+version: "1.0.0"
+description: "뉴스의 주식 시장 영향도 분석"
+model: "gemini-1.5-flash"
+temperature: 0.5
+max_tokens: 600
+
+template: |
+  다음 뉴스가 주식 시장과 투자자에게 미칠 영향을 분석하세요.
+
+  뉴스 제목: {news_title}
+  뉴스 내용: {news_content}
+  {related_companies}
+
+  분석 항목:
+  1. 영향도 레벨: high, medium, low
+  2. 영향을 받을 회사/산업
+  3. 긍정/부정 영향
+  4. 영향 시간대 (즉각적, 단기, 장기)
+
+  JSON 응답 형식:
+  {{
+    "impact_level": "high|medium|low",
+    "reason": "영향도 판단 이유",
+    "affected_companies": [
+      {{"name": "회사명", "impact": "positive|negative", "strength": 0.0-1.0}}
+    ],
+    "affected_industries": ["산업1", "산업2"],
+    "time_horizon": "immediate|short_term|long_term",
+    "affected_keywords": ["키워드1", "키워드2"]
+  }}
+
+parameters:
+  - name: "news_title"
+    type: "string"
+  - name: "news_content"
+    type: "string"
+  - name: "related_companies"
+    type: "string"
+    description: "관련 회사 정보 (선택사항)"
