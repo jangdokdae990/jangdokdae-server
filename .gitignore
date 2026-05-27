@@ -1,0 +1,70 @@
+# 환경
+.env
+.env.local
+.env.*.local
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+ENV/
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+pip-wheel-metadata/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# 테스트
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+.hypothesis/
+
+# 로그
+*.log
+logs/
+
+# 캐시
+.cache/
+.mypy_cache/
+.ruff_cache/
+
+# 데이터베이스
+*.db
+*.sqlite
+*.sqlite3
+
+# Vertex AI 인증키
+credentials.json
+service-account.json
+
+# 기타
+tmp/
+temp/
+*.bak
