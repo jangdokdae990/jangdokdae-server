@@ -208,37 +208,21 @@ class NewsAgentState(TypedDict):
     clusters: list[dict]           # 클러스터 목록 (이슈 단위)
     scored: list[dict]             # 볼륨·속도 점수 붙은 클러스터
     top_issues: list[dict]         # 최종 선정 이슈
-    needs_expansion: bool          # 추가 검색 필요 여부
-    expansion_count: int           # 루프 횟수 (최대 2회)
     errors: list[str]
 ```
 
 ### 4.2 노드 구성
 
 ```
-[collect] → [cluster] → [evaluate] → [finalize]
-                              ↑            ↓
-                         [expand] ←────────┘ (needs_expansion=True, max 2회)
+[collect] → [cluster] → [score] → [finalize]
 ```
 
 | 노드 | 역할 | 사용 도구 |
 |------|------|---------|
 | `collect` | 키워드 기반 뉴스 수집, 정규화, URL 중복 제거 | `search_tool`, `save_tool` |
-| `cluster` | 유사 뉴스 클러스터링 + 볼륨·속도 스코어 계산 | `cluster_tool`, `score_tool` |
-| `evaluate` | LLM: 충분한 이슈가 수집됐는가? 추가 키워드 제안 | Vertex AI Gemini |
-| `expand` | 추가 키워드로 재수집 → cluster 노드 복귀 | `expand_tool` |
-| `finalize` | 상위 이슈 선정, DB 저장, embedding=NULL 마킹 | `save_tool` |
-
-### 4.3 루프 제한
-
-```python
-# evaluate_node
-if state["expansion_count"] >= 2:
-    return {"needs_expansion": False}
-
-# graph 호출 시 하드 상한
-graph.invoke(initial_state, config={"recursion_limit": 10})
-```
+| `cluster` | 유사 뉴스 클러스터링 | `cluster_tool` |
+| `score` | 볼륨·속도 스코어 계산, 상위 이슈 선정 | `score_tool` |
+| `finalize` | DB 저장, embedding=NULL 마킹 | `save_tool` |
 
 ---
 
@@ -285,11 +269,12 @@ class CompanyAgentState(TypedDict):
 ```
 DB (preprocessed_at IS NULL 레코드 조회)
     │
-    ├── 1. HTML 정제 (Naver <b> 태그 제거)
+    ├── 1. HTML 정제 (RSS description HTML 태그 제거)
     ├── 2. 타임존 정규화 (published_at → UTC)
-    ├── 3. URL 정규화 (Google RSS 리다이렉트 → 실제 URL, 트래킹 파라미터 제거)
-    ├── 4. 날짜·snippet 필터 (24시간 초과 / 20자 미만 → 삭제)
-    └── 5. preprocessed_at = now() 업데이트
+    ├── 3. 트래킹 파라미터 제거
+    ├── 4. 날짜 필터 (24시간 초과 → 삭제)
+    ├── 5. 제목 유사도 중복 제거 (Jaccard 0.8)
+    └── 6. preprocessed_at = now() 업데이트
 ```
 
 ### 6.2 상태 (State)
@@ -314,7 +299,7 @@ class PreprocessingAgentState(TypedDict):
 ```
 DB (embedding=NULL 레코드 조회)
     │
-    ├── 1. 제목 + snippet 텍스트 결합
+    ├── 1. title 텍스트 준비 (snippet 없음, title만 사용)
     ├── 2. Vertex AI text-multilingual-embedding-002 호출
     ├── 3. News.embedding 컬럼 업데이트
     └── 4. 벡터 유사도 기반 최종 중복 제거 (cosine ≥ 0.95)
@@ -337,10 +322,9 @@ DB (embedding=NULL 레코드 조회)
 
 | 도구 | 경로 | 사용 에이전트 |
 |------|------|-------------|
-| `search_tool` | `tools/search_tool.py` | NewsCollectionAgent |
+| `search_tool` | `tools/search_tool.py` | NewsCollectionAgent (RSS 피드 수집) |
 | `cluster_tool` | `tools/cluster_tool.py` | NewsCollectionAgent |
 | `score_tool` | `tools/score_tool.py` | NewsCollectionAgent |
-| `expand_tool` | `tools/expand_tool.py` | NewsCollectionAgent |
 | `dart_tool` | `tools/dart_tool.py` | CompanyCollectionAgent |
 | `stock_tool` | `tools/stock_tool.py` | CompanyCollectionAgent |
 | `macro_tool` | `tools/macro_tool.py` | CompanyCollectionAgent |
@@ -375,16 +359,15 @@ async def upsert_news(db: AsyncSession, records: list[dict]) -> int:
 | 컬럼 | 타입 | 용도 |
 |------|------|------|
 | `title` | String(500) | 뉴스 제목 |
-| `snippet` | Text | API 제공 snippet/summary |
 | `url` | String(500), unique | 원문 URL — 중복 방지 키 |
-| `source` | String(100) | `"google_rss_ko"` \| `"naver"` \| `"google_rss_en"` \| `"finnhub"` |
+| `source` | String(100) | 수집 소스 식별자 (예: `"hankyung"`, `"edaily"`, `"investing_stock"`) |
 | `source_type` | String(50) | `"market_news"` \| `"stock_news"` |
 | `region` | String(10) | `"domestic"` \| `"global"` |
 | `symbol` | String(20), nullable | 종목 코드 (종목 뉴스만) |
 | `is_analyzed` | Boolean | 분석 파이프라인 처리 여부 |
 | `published_at` | DateTime(timezone=True) | 기사 발행 시각 (UTC) |
+| `score` | Float, nullable | 볼륨·속도 스코어 (대표 기사 선정용) |
 | `embedding` | Vector(768), nullable | EmbeddingClusteringAgent 저장 |
-| `original_url` | String(500), nullable | Google RSS 리다이렉트 원본 URL 보존 |
 
 **`disclosures` 테이블** (기업 데이터 수집 기획서 스키마 기준)
 
@@ -482,17 +465,14 @@ services/
   │
   ├── collector/                          ← 수집기 + 도구
   │   ├── tools/
-  │   │   ├── search_tool.py
+  │   │   ├── search_tool.py     ← RSS 피드 수집 (feedparser)
   │   │   ├── cluster_tool.py
   │   │   ├── score_tool.py
-  │   │   ├── expand_tool.py
   │   │   ├── dart_tool.py
   │   │   ├── stock_tool.py
   │   │   ├── macro_tool.py
   │   │   └── save_tool.py
-  │   ├── google_news_collector.py
-  │   ├── naver_collector.py
-  │   ├── finnhub_collector.py
+  │   ├── rss_collector.py       ← 국내 증권 RSS + investing.com 통합
   │   ├── dart_collector.py
   │   ├── stock_collector.py
   │   └── macro_collector.py
@@ -524,9 +504,9 @@ dags/                              ← Airflow DAG 정의
 |------|------|---------|
 | 1 | Alembic 설정 + DB 마이그레이션 | — |
 | 2 | `AsyncSession` + `asyncpg` 전환 | — |
-| 3 | 수집기 구현 (google, naver, finnhub, dart, stock, macro) | API 키 발급 |
+| 3 | 수집기 구현 (rss_collector, dart, stock, macro) | Finnhub 외 API 키 불필요 |
 | 4 | `tools/` 구현 (search, save, dart, stock, macro) | 수집기 완료 |
-| 5 | `NewsCollectionAgent` 구현 (collect → cluster → evaluate → finalize) | pgvector 활성화 |
+| 5 | `NewsCollectionAgent` 구현 (collect → cluster → score → finalize) | pgvector 활성화 |
 | 6 | `CompanyCollectionAgent` 구현 | — |
 | 7 | `PreprocessingAgent` 구현 | `services/agents/preprocessing_agent.py` |
 | 8 | `EmbeddingClusteringAgent` 구현 | 임베딩 모델 선정 |

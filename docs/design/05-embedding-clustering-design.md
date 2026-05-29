@@ -149,20 +149,20 @@ EMBEDDING_DIM=768
 
 ### 2.2 임베딩 텍스트 구성
 
-단순 제목보다 **title + snippet 조합**이 더 풍부한 의미를 담는다.
+뉴스 메타데이터로 **제목만** 저장하므로 임베딩 입력도 title 단독으로 한다.
 
 ```python
-def build_embed_text(title: str, snippet: str | None) -> str:
-    if snippet:
-        return f"{title}. {snippet}"
+def build_embed_text(title: str) -> str:
     return title
 ```
 
 | 방식 | 장점 | 단점 |
 |------|------|------|
-| title만 | 짧고 일관됨 | 제목이 모호한 경우 클러스터링 품질 저하 |
-| title + snippet | 맥락 풍부 | snippet 품질에 의존 |
-| **title + snippet (채택)** | 실질적 의미 보존 | — |
+| title만 **(채택)** | 저장 데이터 최소화, 저작권 안전 | 제목이 모호한 경우 클러스터링 품질 저하 |
+| title + snippet | 맥락 풍부 | snippet 저장 필요 → 저작권 리스크 |
+
+주식 뉴스 제목은 핵심 키워드 밀도가 높아 title만으로도 동일 이슈를 묶는 데 실용적으로 충분하다.  
+(`"삼성전자 3분기 영업이익 9.2조"`, `"삼성전자 분기 실적 어닝서프라이즈"` → 같은 클러스터로 묶임)
 
 ---
 
@@ -432,7 +432,7 @@ noise (-1)
 
 ```python
 # 주요 언론사 = 단독 보도여도 중요도 높음
-AUTHORITATIVE_SOURCES = {"google_rss_ko", "naver"}  # 연합뉴스·한경 포함
+AUTHORITATIVE_SOURCES = {"hankyung", "edaily", "einfomax"}  # 주요 증권 언론사
 
 def is_authoritative_source(news: News) -> bool:
     return news.source in AUTHORITATIVE_SOURCES
@@ -611,7 +611,7 @@ SINGLETON_CONFIDENCE_THRESHOLD=0.7 # 중요 단독 이슈 판별 기준
 ## 6. 주요 이슈 선정 — 볼륨·속도 스코어
 
 클러스터링 완료 후 **오늘 분석할 이슈**를 선정한다.  
-뉴스 수집 에이전트(`NewsCollectionAgent`)의 `evaluate_node`에서 이미 1차 선정했지만, 임베딩 후 클러스터 크기가 확정되면 최종 스코어를 계산한다.
+클러스터링 완료 후 클러스터 크기와 속도를 기반으로 최종 스코어를 계산한다.
 
 ### 6.1 스코어 계산
 
@@ -749,7 +749,7 @@ async def run(self) -> EmbeddingClusteringAgentState:
 
 | 테이블 | 임베딩 텍스트 | 이유 |
 |--------|------------|------|
-| `news` | `f"{title}. {snippet}"` | 제목 + 요약으로 풍부한 의미 보존 |
+| `news` | `title` | 제목만 저장 (snippet 미저장), 주식 뉴스 제목은 키워드 밀도가 높아 클러스터링에 충분 |
 | `disclosures` | `f"{title}. {content[:500]}"` | 공시 제목 + 본문 앞 500자 |
 | `report_chunks` | `content` | 청크 본문 전체 (RAG 검색 정확도 우선) |
 

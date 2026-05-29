@@ -32,9 +32,9 @@
 
 | 문제 | 원인 | 영향 |
 |------|------|------|
-| HTML 태그 포함 | Naver API `description` 필드 | 임베딩 품질 저하, LLM 혼란 |
-| 타임존 불일치 | 소스별 UTC/KST/Unix 혼용 | 날짜 필터·정렬 오류 |
-| 리다이렉트 URL | Google RSS `entry.link` | URL unique 제약 무효화 |
+| HTML 태그 포함 | 일부 RSS `description` 필드 | 임베딩 품질 저하, LLM 혼란 |
+| 타임존 불일치 | 소스별 UTC/KST 혼용 | 날짜 필터·정렬 오류 |
+| 트래킹 파라미터 | utm_source, fbclid 등 | URL unique 제약 오작동 |
 | 중복 기사 | 동일 이슈를 여러 소스가 동시 보도 | 임베딩 비용 낭비, 클러스터 왜곡 |
 | 오래된 기사 | RSS 피드에 과거 기사 포함 | 분석 파이프라인에 stale 데이터 투입 |
 
@@ -77,18 +77,16 @@
     │
     ▼
 Step 1. HTML 정제
-    │    Naver description의 <b> 태그·HTML 엔티티 제거
+    │    RSS description HTML 태그·HTML 엔티티 제거
     ▼
 Step 2. 타임존 정규화
     │    모든 published_at → UTC aware datetime
     ▼
 Step 3. URL 정규화
-    │    3-A. Google RSS 리다이렉트 → 실제 기사 URL
-    │    3-B. utm_source, fbclid 등 트래킹 파라미터 제거
+    │    utm_source, fbclid 등 트래킹 파라미터 제거
     ▼
 Step 4. 필터링
     │    4-A. 날짜 필터 (24시간 초과 제거)
-    │    4-B. snippet 최소 길이 필터 (20자 미만 제거)
     ▼
 Step 5. 중복 제거
     │    5-A. DB 레벨 URL unique 제약 (수집 시점 처리)
@@ -105,12 +103,11 @@ DB 업데이트 (preprocessed_at=now(), url 정규화 반영)
 
 ### Step 1. HTML 정제
 
-**대상 소스**: Naver News API (`description` 필드)  
-**문제**: 검색어 강조를 위한 `<b>` 태그와 HTML 엔티티(`&amp;`, `&lt;` 등) 포함
+**문제**: 일부 RSS 피드의 `description` 필드에 HTML 태그·엔티티가 포함될 수 있다.
 
 ```
-입력:  "<b>삼성전자</b> 3분기 영업이익이 &amp;전년 대비..."
-출력:  "삼성전자 3분기 영업이익이 &전년 대비..."
+입력:  "<b>삼성전자</b> 3분기 영업이익 &amp;전년 대비..."
+출력:  "삼성전자 3분기 영업이익 &전년 대비..."
 ```
 
 ```python
@@ -121,17 +118,11 @@ def clean_html(text: str) -> str:
     if not text:
         return ""
     text = html.unescape(text)                               # &amp; → &
-    text = BeautifulSoup(text, "html.parser").get_text()     # <b> 제거
+    text = BeautifulSoup(text, "html.parser").get_text()     # 태그 제거
     return text.strip()
 ```
 
-**소스별 적용 여부:**
-
-| 소스 | HTML 정제 필요 |
-|------|--------------|
-| Naver API | ✅ 필요 |
-| Google News RSS | 불필요 (plain text) |
-| Finnhub | 불필요 (plain text) |
+모든 소스에 일괄 적용한다. 이미 plain text인 경우 변환 비용이 낮아 무해하다.
 
 ---
 
@@ -141,9 +132,8 @@ def clean_html(text: str) -> str:
 
 | 소스 | 형식 | 예시 |
 |------|------|------|
-| Google News RSS | RFC 2822 (KST 포함) | `"Thu, 28 May 2026 09:00:00 +0900"` |
-| Naver API | RFC 2822 (KST) | `"Thu, 28 May 2026 09:00:00 +0900"` |
-| Finnhub | Unix timestamp (UTC) | `1748390400` |
+| 국내 증권 RSS | RFC 2822 (KST) | `"Thu, 28 May 2026 09:00:00 +0900"` |
+| investing.com RSS | RFC 2822 (UTC) | `"Thu, 28 May 2026 00:00:00 +0000"` |
 
 **모든 `published_at`을 UTC aware datetime으로 정규화한다.**
 
@@ -151,50 +141,16 @@ def clean_html(text: str) -> str:
 from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
 
-def normalize_published_at(raw, source: str) -> datetime:
-    if source == "finnhub":
-        return datetime.fromtimestamp(int(raw), tz=timezone.utc)
-    else:
-        # Google RSS, Naver — RFC 2822 파싱 후 UTC 변환
-        return parsedate_to_datetime(raw).astimezone(timezone.utc)
+def normalize_published_at(raw: str) -> datetime:
+    # RFC 2822 파싱 후 UTC 변환 (모든 RSS 공통)
+    return parsedate_to_datetime(raw).astimezone(timezone.utc)
 ```
 
 ---
 
 ### Step 3. URL 정규화
 
-#### 3-A. Google RSS 리다이렉트 해소
-
-**문제**: Google News RSS의 `entry.link`는 실제 기사 URL이 아닌 구글 리다이렉트 URL이다.
-
-```
-입력:  "https://news.google.com/rss/articles/CBMiXGh0dHBzOi8..."
-출력:  "https://www.hankyung.com/article/2026052812345"
-```
-
-리다이렉트 URL이 그대로 저장되면:
-- 같은 기사가 다른 Google URL로 중복 수집될 수 있음
-- 시간이 지나면 Google URL이 만료되어 접근 불가
-
-```python
-import httpx
-
-async def resolve_google_rss_url(url: str) -> str:
-    if "news.google.com" not in url:
-        return url
-    try:
-        async with httpx.AsyncClient(follow_redirects=True, timeout=5.0) as client:
-            response = await client.head(url)
-            return str(response.url)
-    except Exception:
-        return url  # 실패 시 원본 URL 유지
-```
-
-> **성능**: HTTP 요청이 필요하므로 배치 내 최대 50건 병렬 처리.
-
----
-
-#### 3-B. 트래킹 파라미터 제거
+#### 트래킹 파라미터 제거
 
 **문제**: 동일 기사 URL에 추적 파라미터가 붙어 다른 URL로 인식된다.
 
@@ -224,7 +180,7 @@ def remove_tracking_params(url: str) -> str:
     return parsed._replace(query=urlencode(clean_params, doseq=True)).geturl()
 ```
 
-**적용 소스**: 모든 소스 (Google RSS, Naver, Finnhub 모두 적용)
+**적용 소스**: 모든 RSS 피드
 
 ---
 
@@ -251,28 +207,6 @@ def is_recent(published_at: datetime, threshold_hours: int = 24) -> bool:
 > 단순 24시간 필터로 시작하고, 실제 누락 기사 발생 시 시점별 임계값으로 세분화한다.
 
 ---
-
-#### 4-B. snippet 최소 길이 필터
-
-snippet이 없거나 너무 짧으면 LLM 분석에 투입해도 의미 없다.
-
-```
-탈락 케이스:
-  None        → snippet 미제공
-  ""          → 빈 문자열
-  "삼성전자..."  → 10자 미만 truncation
-```
-
-```python
-def has_valid_snippet(snippet: str | None, min_length: int = 20) -> bool:
-    if not snippet:
-        return False
-    return len(snippet.strip()) >= min_length
-```
-
-| 임계값 | 이유 |
-|--------|------|
-| 20자 | "삼성전자 3분기 실적 발표" 수준의 최소 맥락 전달 가능 길이 |
 
 ---
 
@@ -349,7 +283,7 @@ def deduplicate_by_title(
 ### Step 5 → DB 업데이트
 
 필터를 통과한 레코드는 정제된 값으로 업데이트하고 `preprocessed_at`을 기록한다.  
-날짜·snippet 필터 탈락 레코드는 삭제하지 않고 `preprocessed_at`만 기록해  
+날짜 필터 탈락 레코드는 삭제하지 않고 `preprocessed_at`만 기록해  
 "처리는 됐으나 분석 제외"임을 표시한다.
 
 ```python
@@ -362,9 +296,7 @@ async def save_preprocessed(db: AsyncSession, records: list[dict]) -> None:
             update(News)
             .where(News.id == record["id"])
             .values(
-                snippet=record["snippet"],
                 url=record["url"],
-                original_url=record.get("original_url"),
                 published_at=record["published_at"],
                 preprocessed_at=now,
                 # 필터 탈락 시 분석 파이프라인 스킵
@@ -395,41 +327,26 @@ async def run(self) -> PreprocessingAgentState:
         batch = await fetch_unprocessed(limit=BATCH_SIZE)  # preprocessed_at IS NULL
         if not batch:
             break
-        cleaned   = await Normalizer.run_all(batch)       # HTML, 타임존, URL (3-A,3-B)
-        filtered  = Filter.run(cleaned)                  # 날짜, snippet 길이
+        cleaned   = await Normalizer.run_all(batch)       # HTML, 타임존, 트래킹 파라미터
+        filtered  = Filter.run(cleaned)                  # 날짜 필터
         url_dedup = UrlDeduplicator.deduplicate(filtered) # URL unique (5-A)
         deduped   = TitleDeduplicator.deduplicate(url_dedup)  # 제목 유사도 (5-B)
         await save_preprocessed(deduped)                 # preprocessed_at = now()
 ```
 
-### 4.2 URL 정규화 병렬 처리
-
-Google RSS URL 정규화는 HTTP 요청이 필요하므로 배치 내에서 병렬 처리한다.
-
-```python
-# 배치 내 병렬 — 최대 50건 동시
-google_items = [item for item in items if "news.google.com" in item["url"]]
-semaphore = asyncio.Semaphore(50)
-resolved = await asyncio.gather(
-    *[resolve_google_rss_url(item["url"], semaphore) for item in google_items],
-    return_exceptions=True,
-)
-```
 
 ---
 
 ## 5. 소스별 전처리 적용 매트릭스
 
-| 단계 | Google RSS (ko) | Google RSS (en) | Naver API | Finnhub |
-|------|:--------------:|:---------------:|:---------:|:-------:|
-| 1. HTML 정제 | — | — | ✅ | — |
-| 2. 타임존 정규화 | ✅ KST→UTC | ✅ KST→UTC | ✅ KST→UTC | ✅ Unix→UTC |
-| 3-A. URL 리다이렉트 해소 | ✅ | ✅ | — | — |
-| 3-B. 트래킹 파라미터 제거 | ✅ | ✅ | ✅ | ✅ |
-| 4-A. 날짜 필터 | ✅ | ✅ | ✅ | ✅ |
-| 4-B. snippet 길이 필터 | ✅ | ✅ | ✅ | ✅ |
-| 5-A. URL 중복 제거 | ✅ | ✅ | ✅ | ✅ |
-| 5-B. 제목 유사도 중복 제거 | ✅ | ✅ | ✅ | ✅ |
+| 단계 | 국내 증권 RSS (13개) | investing.com RSS (3개) |
+|------|:-----------------:|:--------------------:|
+| 1. HTML 정제 | ✅ | ✅ |
+| 2. 타임존 정규화 | ✅ KST→UTC | ✅ UTC (변환 불필요) |
+| 3. 트래킹 파라미터 제거 | ✅ | ✅ |
+| 4-A. 날짜 필터 | ✅ | ✅ |
+| 5-A. URL 중복 제거 | ✅ | ✅ |
+| 5-B. 제목 유사도 중복 제거 | ✅ | ✅ |
 
 ---
 
@@ -437,27 +354,19 @@ resolved = await asyncio.gather(
 
 | 시나리오 | 처리 방식 |
 |---------|---------|
-| HTML 정제 실패 | 원본 snippet 유지, 계속 진행 |
+| HTML 정제 실패 | 원본 title 유지, 계속 진행 |
 | 타임존 파싱 실패 | `created_at` (수집 시각)으로 대체, WARNING 로그 |
-| URL 리다이렉트 해소 실패 (timeout) | 원본 Google URL 유지, 계속 진행 |
 | 트래킹 파라미터 제거 실패 | 원본 URL 유지, 계속 진행 |
 | URL 충돌 (정규화 후 중복) | 현재 레코드 제외, 기존 레코드 유지 |
-| snippet 길이 부족 | 해당 레코드 저장하지 않음 (탈락) |
 | DB 저장 실패 | 배치 롤백, 다음 실행 시 재처리 |
 
 ---
 
 ## 7. DB 변경 사항
 
-### `news` 테이블 추가 컬럼
+### `news` 테이블 변경 없음
 
-URL 변경 이력 추적을 위한 컬럼을 추가한다.
-
-```python
-original_url = Column(String(500), nullable=True)  # 정규화 전 원본 URL (Google RSS)
-```
-
-URL 정규화 후 `url`을 실제 URL로 업데이트하고 `original_url`에 Google 리다이렉트 URL을 보관한다.
+트래킹 파라미터 제거 후 `url` 컬럼을 업데이트한다. `original_url` 컬럼은 불필요 (Google RSS 제거됨).
 
 ---
 
@@ -469,8 +378,7 @@ URL 정규화 후 `url`을 실제 URL로 업데이트하고 `original_url`에 Go
 | 2 | `filter.py` 구현 (날짜 필터) | `services/preprocessor/filter.py` | — |
 | 3 | `deduplicator.py` 구현 (URL + 제목 유사도) | `services/preprocessor/deduplicator.py` | — |
 | 4 | `PreprocessingAgent` 노드 조립 | `services/agents/preprocessing_agent.py` | 1~3 완료 |
-| 5 | `news` 테이블 `original_url` 컬럼 추가 | Alembic 마이그레이션 | Alembic 설정 |
-| 6 | 통합 테스트 (소스별 샘플 100건) | — | 수집 에이전트 완료 |
+| 5 | 통합 테스트 (소스별 샘플 100건) | — | 수집 에이전트 완료 |
 
 ---
 
