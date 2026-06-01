@@ -80,9 +80,9 @@ FastAPI 관행에 따라 역할 중심 이름을 사용한다.
 ```
 app/api/models.py        # Pydantic 스키마 모음 (단수 아닌 모음이므로 복수 아님)
 app/api/routers/news.py  # 도메인별 라우터 — 도메인명 단수
-app/db/models.py         # ORM 모델 모음
+app/db/orm_models/       # ORM 모델 (모델별 파일 분리: news.py, stock_price.py, common.py)
 app/db/queries.py        # 쿼리 함수 모음
-app/db/database.py       # DB 연결 설정
+app/db/base.py           # Base + 비동기 엔진·세션 + ORM 공통 정의(KST_NOW)
 app/core/security.py     # JWT, 비밀번호 처리
 app/core/errors.py       # 커스텀 예외
 app/llm/chains.py        # LangChain 체인 모음

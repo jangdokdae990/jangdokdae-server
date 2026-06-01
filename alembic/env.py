@@ -11,8 +11,17 @@ from alembic import context
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from app.config import settings  # noqa: E402
-from app.db.database import Base  # noqa: E402
-from app.db import models  # noqa: E402,F401 (모델을 Base.metadata에 등록)
+from app.db.base import Base  # noqa: E402
+
+# 모든 모델 모듈을 import 해 Base.metadata에 등록한다 (autogenerate가 인식하도록).
+# 새 모델 추가 시 여기에도 import를 추가할 것.
+from app.db.orm_models import (  # noqa: E402,F401
+    disclosure,
+    financial_statement,
+    market_indicator,
+    news,
+    stock_price,
+)
 
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.

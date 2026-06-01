@@ -1,4 +1,4 @@
-"""ORM 모델 모음"""
+"""News ORM 모델 — 수집한 뉴스 메타데이터."""
 
 from datetime import datetime
 
@@ -6,12 +6,7 @@ from pgvector.sqlalchemy import Vector
 from sqlalchemy import Boolean, DateTime, Float, Integer, String, text
 from sqlalchemy.orm import Mapped, mapped_column
 
-from app.db.database import Base
-
-# 모든 시각 컬럼은 timezone 없는 한국 시각(KST 벽시계)으로 저장한다.
-# Neon pooler가 세션 타임존을 강제하고 asyncpg는 timestamptz를 UTC로 돌려줘서,
-# timestamptz로는 KST 표시가 보장되지 않기 때문(한국 전용 서비스 → naive KST가 단순·명확).
-_KST_NOW = text("(now() AT TIME ZONE 'Asia/Seoul')")
+from app.db.base import KST_NOW, Base
 
 
 class News(Base):
@@ -27,7 +22,7 @@ class News(Base):
     published_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=False), nullable=True)
     # core pg_insert는 Python default 미적용 → server_default로 DB 기본값(KST) 지정
     created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=False), server_default=_KST_NOW, nullable=False
+        DateTime(timezone=False), server_default=KST_NOW, nullable=False
     )
     preprocessed_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=False), nullable=True

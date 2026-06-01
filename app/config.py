@@ -11,6 +11,8 @@ class Settings(BaseSettings):
     app_name: str = "장독대"
     debug: bool = False
     database_url: str  # .env의 Neon 기본형 URL (postgresql://...?sslmode=require)
+    opendart_api_key: str = ""  # DART 공시 API 키 (.env: OPENDART_API_KEY)
+    ecos_api_key: str = ""  # 한국은행 ECOS 거시지표 API 키 (.env: ECOS_API_KEY)
 
     @property
     def async_url(self) -> str:
