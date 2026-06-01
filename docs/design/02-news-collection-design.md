@@ -288,7 +288,7 @@ async def run_collection() -> list[dict]:
 | **Entity Prominence** | 언급된 기업 중요도 | 코스피200 여부, 시총 |
 | **Social Signals** | SNS·검색 반응 | 구글 트렌드, 트위터 멘션 수 |
 
-장독대 MVP에서는 **Volume + Velocity + LLM 판단** 3가지로 시작하고, 이후 Sentiment·Entity Prominence를 추가한다.
+장독대 MVP에서는 **Volume + Velocity** 3가지로 시작하고, 이후 Sentiment·Entity Prominence를 추가한다.
 
 ---
 

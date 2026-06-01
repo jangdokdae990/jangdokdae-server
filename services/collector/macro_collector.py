@@ -1,4 +1,22 @@
-"""거시지표 수집기 — FinanceDataReader 환율 + 한국은행 ECOS 금리·CPI·M2."""
+"""거시지표 수집기 — FinanceDataReader 환율 + 한국은행 ECOS 금리·CPI·M2.
+
+역할:
+    거시 이슈 분석 컨텍스트로 쓰일 두 종류의 시계열을 수집한다(설계 03 §4.4–4.5).
+    소스가 둘로 나뉘어 진입점도 둘이다:
+      - collect():      환율 4종(USD·JPY·EUR·CNY/KRW) — FinanceDataReader(동기→to_thread)
+      - collect_ecos(): 기준금리·CPI·M2 — 한국은행 ECOS API(비동기 httpx)
+
+핵심 동작:
+    - 두 경로 모두 지표/통화 단위로 에러를 격리한다.
+    - 환율은 일별, ECOS는 월별. NaN(휴장일)·결측치 행은 스킵한다.
+    - ECOS 예외 로깅은 redact_secrets로 감싸 URL 경로의 API 키 유출을 막는다.
+
+경계:
+    출력 = CollectedIndicator.to_record() → save_tool.upsert_market_indicators
+    (indicator_type, currency, date) UPSERT. 환율은 currency 값 있음, ECOS는 NULL.
+주의:
+    ECOS 주기 코드는 "M"(설계 문서의 "MM"은 오기), M2는 161Y006(구 표 101Y004는 폐지).
+"""
 
 import asyncio
 import logging
@@ -9,6 +27,7 @@ import FinanceDataReader as fdr
 import httpx
 
 from app.config import settings
+from services.collector.tools.redact import redact_secrets
 
 logger = logging.getLogger(__name__)
 
@@ -125,7 +144,9 @@ class MacroCollector:
         indicators: list[CollectedIndicator] = []
         for ind, batch in zip(self.ecos_indicators, batches):
             if isinstance(batch, BaseException):
-                logger.error("ECOS 수집 실패 type=%s err=%s", ind.indicator_type, batch)
+                logger.error(
+                    "ECOS 수집 실패 type=%s err=%s", ind.indicator_type, redact_secrets(batch)
+                )
                 continue
             indicators.extend(batch)
         return indicators

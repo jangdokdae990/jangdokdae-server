@@ -1,4 +1,15 @@
-"""RSS 피드 목록 — 식별자·URL·언론사 상수"""
+"""RSS 피드 목록 — 수집 대상 피드의 식별자·URL·언론사 상수 정의.
+
+역할:
+    rss_collector가 폴링할 16개 피드를 FeedSource 데이터클래스로 선언한다.
+    국내 증권 전문 RSS 13개(DOMESTIC_SECURITIES_RSS) + investing.com 글로벌 3개
+    (GLOBAL_INVESTING_RSS)를 합쳐 ALL_FEEDS로 노출한다.
+
+운영:
+    피드 추가·제거는 이 파일의 리스트만 수정하면 되고 수집기 코드 변경이 불필요하다
+    (설계 02 §5.2). rss_source는 피드 식별자, publisher는 <source> 부재 시
+    news_source 폴백값으로만 쓰인다.
+"""
 
 from dataclasses import dataclass
 

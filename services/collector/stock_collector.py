@@ -1,4 +1,21 @@
-"""주가 수집기 — FinanceDataReader 기반 국내 일봉 수집."""
+"""주가 수집기 — FinanceDataReader 기반 국내 일봉(OHLCV) 수집.
+
+역할:
+    추적 기업의 일별 시가·고가·저가·종가·거래량을 start_date부터 최신까지 수집한다.
+    분석 파이프라인의 '보조 컨텍스트'로 쓰인다(설계 03 §1.2).
+
+핵심 동작:
+    - collect(): 종목별로 to_thread(_fetch_one)를 asyncio.gather로 병렬 실행하고
+      종목 단위로 에러를 격리한다. FinanceDataReader가 동기 라이브러리이므로
+      이벤트 루프를 막지 않도록 to_thread로 감싼다.
+    - 결측 OHLCV 행(거래정지·데이터 누락)은 스킵한다.
+
+경계:
+    입력 = company_loader가 만든 list[StockSymbol] / 출력 = CollectedPrice.to_record()
+    → save_tool.upsert_stock_prices (stock_code, date) UPSERT.
+미구현:
+    시가총액·외국인 보유(pykrx)와 해외 주가(yfinance)는 설계상 보조 항목으로 미수집.
+"""
 
 import asyncio
 import logging

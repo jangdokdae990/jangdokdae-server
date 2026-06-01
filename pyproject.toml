@@ -27,6 +27,7 @@ dependencies = [
     "greenlet==3.5.1",
     "python-dateutil==2.9.0.post0",
     "finance-datareader==0.9.202",
+    "pykrx>=1.2.8",
 ]
 
 [project.optional-dependencies]
@@ -58,6 +59,10 @@ extend-exclude = ["alembic"]  # 자동 생성 마이그레이션·env.py는 린�
 [tool.ruff.lint]
 select = ["E", "F", "W", "I"]
 
+[tool.ruff.lint.per-file-ignores]
+# 정렬된 기업 데이터 테이블(SECTORS·COMPANIES) — 컬럼 정렬 검수성을 위해 라인 길이 허용
+"scripts/seed_company_entities.py" = ["E501"]
+
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 pythonpath = ["."]
@@ -71,5 +76,5 @@ namespace_packages = true
 explicit_package_bases = true
 
 [[tool.mypy.overrides]]
-module = ["feedparser", "pgvector.*", "dateutil.*", "FinanceDataReader"]
+module = ["feedparser", "pgvector.*", "dateutil.*", "FinanceDataReader", "pykrx.*"]
 ignore_missing_imports = true

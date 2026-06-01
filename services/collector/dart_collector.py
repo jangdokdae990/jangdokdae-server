@@ -1,4 +1,20 @@
-"""DART 공시 수집기 — opendart REST API(list.json) 기반."""
+"""DART 공시 수집기 — OpenDART REST API(list.json) 기반 공시 목록 수집.
+
+역할:
+    추적 기업의 정기보고서(A)·주요사항보고서(B) 공시 메타데이터(접수번호·제목·
+    공시일 등)를 기간 단위로 수집한다. 공시 본문(content)은 여기서 받지 않고
+    분석 단계에서 별도 fetch한다 — 현재 content는 NULL로 저장된다.
+
+핵심 동작:
+    - collect(): (기업 × 공시유형) 조합을 작업 단위로 만들어 병렬 수집하고,
+      각 조합 단위로 에러를 격리한다. total_page 기준으로 페이지네이션한다.
+    - status="013"(데이터 없음)은 정상으로 간주해 조용히 종료한다.
+    - 예외 로깅은 redact_secrets로 감싸 crtfc_key 유출을 막는다.
+
+경계:
+    입력 = company_loader의 list[StockSymbol](corp_code 있는 기업만 대상)
+    / 출력 = CollectedDisclosure.to_record() → save_tool.upsert_disclosures (rcept_no UPSERT).
+"""
 
 import asyncio
 import logging
@@ -9,6 +25,7 @@ import httpx
 
 from app.config import settings
 from services.collector.stock_symbols import ALL_STOCKS, StockSymbol
+from services.collector.tools.redact import redact_secrets
 
 logger = logging.getLogger(__name__)
 
@@ -65,7 +82,10 @@ class DARTCollector:
         for (company, dtype), batch in zip(jobs, batches):
             if isinstance(batch, BaseException):
                 logger.error(
-                    "공시 수집 실패 corp_code=%s type=%s err=%s", company.corp_code, dtype, batch
+                    "공시 수집 실패 corp_code=%s type=%s err=%s",
+                    company.corp_code,
+                    dtype,
+                    redact_secrets(batch),
                 )
                 continue
             disclosures.extend(batch)
@@ -107,7 +127,9 @@ class DARTCollector:
                 )
                 break
             results.extend(
-                self._to_disclosure(item, company, dtype) for item in data.get("list", [])
+                d
+                for item in data.get("list", [])
+                if (d := self._to_disclosure(item, company, dtype)) is not None
             )
             if page >= int(data.get("total_page", 1)):
                 break
@@ -115,14 +137,28 @@ class DARTCollector:
         return results
 
     @staticmethod
-    def _to_disclosure(item: dict, company: StockSymbol, dtype: str) -> CollectedDisclosure:
+    def _to_disclosure(
+        item: dict, company: StockSymbol, dtype: str
+    ) -> CollectedDisclosure | None:
+        # rcept_no·rcept_dt가 없거나 형식이 깨진 항목은 그 항목만 건너뛴다.
+        # (직접 접근 시 KeyError/ValueError가 같은 페이지의 정상 공시까지 통째로 유실시킴)
+        rcept_no = (item.get("rcept_no") or "").strip()
+        rcept_dt = (item.get("rcept_dt") or "").strip()
+        if not rcept_no or not rcept_dt:
+            logger.warning("공시 항목 누락 corp_code=%s rcept_no=%r", company.corp_code, rcept_no)
+            return None
+        try:
+            disclosed_at = datetime.strptime(rcept_dt, "%Y%m%d")
+        except ValueError:
+            logger.warning("공시일 형식 오류 rcept_no=%s rcept_dt=%r", rcept_no, rcept_dt)
+            return None
         stock_code = (item.get("stock_code") or "").strip() or None
         return CollectedDisclosure(
-            rcept_no=item["rcept_no"],
+            rcept_no=rcept_no,
             title=(item.get("report_nm") or "").strip(),
             corp_name=(item.get("corp_name") or "").strip(),
             corp_code=item.get("corp_code") or company.corp_code,
             stock_code=stock_code,
             disclosure_type=dtype,
-            disclosed_at=datetime.strptime(item["rcept_dt"], "%Y%m%d"),
+            disclosed_at=disclosed_at,
         )

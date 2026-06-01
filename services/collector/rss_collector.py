@@ -1,4 +1,21 @@
-"""RSS 피드 뉴스 수집기"""
+"""RSS 피드 뉴스 수집기 — 파이프라인 '수집' 단계의 뉴스 진입점.
+
+역할:
+    16개 RSS 피드(국내 증권 13 + investing.com 3)를 병렬로 폴링해 기사
+    제목·URL·출처·발행일을 수집한다. 본문·snippet은 저작권 리스크로 저장하지 않는다
+    (본문은 분석 시점에 대표 기사만 실시간 fetch 후 폐기 — 설계 02 §3.4).
+
+핵심 동작:
+    - collect(): Semaphore(8)로 동시성을 제한해 피드를 병렬 수집. 피드 단위
+      에러 격리(asyncio.gather(return_exceptions=True)) — 한 피드 실패가 전체를 막지 않는다.
+    - news_source(본문 출처)와 rss_source(수집 피드)를 분리 저장. 집계형 피드는
+      기사별 <source>를, 단일 언론사 피드는 feed.publisher를 폴백으로 쓴다.
+    - 발행일은 KST naive datetime으로 정규화(struct_time → dateutil 폴백).
+
+경계:
+    입력 = rss_feeds.ALL_FEEDS / 출력 = CollectedNews.to_record() → save_tool.upsert_news.
+    종목 코드(symbol)는 채우지 않는다 — 분석 단계의 Entity NER이 담당.
+"""
 
 import asyncio
 import logging
@@ -125,8 +142,11 @@ class RSSCollector:
         그 값을 쓴다. 단일 언론사 피드(한국경제 등)는 <source>가 비어 있어,
         피드에 설정된 feed.publisher를 폴백으로 채운다.
         """
-        source = entry.get("source") or {}
-        return source.get("title") or feed.publisher
+        # 비정상 피드가 <source>를 비-dict로 줄 수 있어 타입 가드 (AttributeError 방지)
+        source = entry.get("source")
+        if isinstance(source, dict) and source.get("title"):
+            return str(source["title"])
+        return feed.publisher
 
     @staticmethod
     def _parse_published(
@@ -136,8 +156,13 @@ class RSSCollector:
         # 1) feedparser가 파싱한 struct_time(UTC) 우선. <pubDate> 없으면 <dc:date>/<updated>
         parsed_time = entry.get("published_parsed") or entry.get("updated_parsed")
         if parsed_time:
-            utc_dt = datetime(*parsed_time[:6], tzinfo=timezone.utc)  # type: ignore[misc]
-            return to_naive_kst(utc_dt)
+            # 깨진 struct_time(범위 밖 연·월 등)도 한 기사 때문에 피드 전체가 유실되지
+            # 않도록 변환 실패를 격리하고 2) 문자열 폴백으로 넘긴다.
+            try:
+                utc_dt = datetime(*parsed_time[:6], tzinfo=timezone.utc)  # type: ignore[misc]
+                return to_naive_kst(utc_dt)
+            except (ValueError, TypeError):
+                logger.debug("struct_time 변환 실패 rss_source=%s", feed.rss_source)
 
         # 2) struct_time이 없으면 원본 문자열을 직접 파싱.
         #    일부 피드(예: 파이낸셜뉴스 'Mon,1 Jun ...')는 비표준 형식이라 feedparser가 못 읽음
@@ -145,9 +170,13 @@ class RSSCollector:
         if raw:
             try:
                 parsed: datetime = date_parser.parse(raw)
-            except (ValueError, OverflowError):
+            except (ValueError, OverflowError, TypeError):
                 logger.debug("발행일 파싱 실패 rss_source=%s raw=%s", feed.rss_source, raw)
                 return None
+            # 오프셋 없는 시각은 UTC로 가정 — struct_time 경로(항상 UTC)와 기준을 일치시켜
+            # 동일 시각이 경로에 따라 9시간 어긋나는 것을 방지
+            if parsed.tzinfo is None:
+                parsed = parsed.replace(tzinfo=timezone.utc)
             return to_naive_kst(parsed)
 
         logger.debug("발행일 없음 rss_source=%s", feed.rss_source)

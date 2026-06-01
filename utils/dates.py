@@ -11,3 +11,8 @@ def to_naive_kst(dt: datetime) -> datetime:
     if dt.tzinfo is None:
         return dt
     return dt.astimezone(KST).replace(tzinfo=None)
+
+
+def now_kst() -> datetime:
+    """현재 시각을 timezone 없는 한국 시각(KST naive)으로 반환. DB 저장값과 동일 기준."""
+    return datetime.now(KST).replace(tzinfo=None)

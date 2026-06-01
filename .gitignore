@@ -68,3 +68,5 @@ service-account.json
 tmp/
 temp/
 *.bak
+tests/
+scripts/

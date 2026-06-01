@@ -1,6 +1,6 @@
 """재무제표 수집기 — DART fnlttSinglAcntAll.json(구조화 재무 API) 기반.
 
-설계의 dart-fss 대신 DART 구조화 JSON API 사용 (HTML 파싱 불필요, 비동기, 경량).
+DART 구조화 JSON API 사용 (HTML 파싱 불필요, 비동기, 경량).
 매출액·영업이익·당기순이익·자산총계 4개 핵심 수치를 수집한다.
 """
 
@@ -12,6 +12,7 @@ import httpx
 
 from app.config import settings
 from services.collector.stock_symbols import ALL_STOCKS, StockSymbol
+from services.collector.tools.redact import redact_secrets
 
 logger = logging.getLogger(__name__)
 
@@ -42,12 +43,14 @@ class CollectedFinancial:
     operating_income: int | None
     net_income: int | None
     total_assets: int | None
+    rcept_no: str | None = None  # 원천 사업보고서 접수번호 (추적 키)
 
     def to_record(self) -> dict[str, object]:
         # save_tool.upsert_financial_statements / FinancialStatement 컬럼 입력 형식
         return {
             "corp_code": self.corp_code,
             "corp_name": self.corp_name,
+            "rcept_no": self.rcept_no,
             "year": self.year,
             "quarter": self.quarter,
             "revenue": self.revenue,
@@ -77,7 +80,11 @@ class FinancialCollector:
         statements: list[CollectedFinancial] = []
         for company, result in zip(self.companies, results):
             if isinstance(result, BaseException):
-                logger.error("재무제표 수집 실패 corp_code=%s err=%s", company.corp_code, result)
+                logger.error(
+                    "재무제표 수집 실패 corp_code=%s err=%s",
+                    company.corp_code,
+                    redact_secrets(result),
+                )
                 continue
             if result is not None:
                 statements.append(result)
@@ -86,26 +93,19 @@ class FinancialCollector:
     async def _fetch(
         self, client: httpx.AsyncClient, company: StockSymbol, bsns_year: int, reprt_code: str
     ) -> CollectedFinancial | None:
-        params = {
-            "crtfc_key": settings.opendart_api_key,
-            "corp_code": company.corp_code,
-            "bsns_year": str(bsns_year),
-            "reprt_code": reprt_code,
-            "fs_div": "CFS",  # 연결재무제표
-        }
-        response = await client.get(DART_FS_URL, params=params)
-        response.raise_for_status()
-        data = response.json()
-        status = data.get("status")
-        if status != "000":  # 013=데이터 없음 포함
+        # 연결재무제표(CFS) 우선, 없으면 개별재무제표(OFS) 폴백.
+        # 종속회사가 없어 연결을 작성하지 않는 기업은 CFS가 013(데이터 없음)이라
+        # CFS만 조회하면 재무 수치가 통째로 누락된다.
+        accounts = await self._fetch_accounts(client, company, bsns_year, reprt_code, "CFS")
+        if accounts is None:
+            accounts = await self._fetch_accounts(client, company, bsns_year, reprt_code, "OFS")
+        if accounts is None:
             logger.warning(
-                "재무제표 응답 없음/비정상 corp_code=%s year=%s status=%s",
+                "재무제표 없음 corp_code=%s year=%s (CFS·OFS 모두 데이터 없음)",
                 company.corp_code,
                 bsns_year,
-                status,
             )
             return None
-        accounts = data.get("list", [])
         return CollectedFinancial(
             corp_code=company.corp_code,
             corp_name=company.name,
@@ -115,7 +115,41 @@ class FinancialCollector:
             operating_income=self._extract(accounts, *_METRICS["operating_income"]),
             net_income=self._extract(accounts, *_METRICS["net_income"]),
             total_assets=self._extract(accounts, *_METRICS["total_assets"]),
+            rcept_no=self._extract_rcept_no(accounts),
         )
+
+    async def _fetch_accounts(
+        self,
+        client: httpx.AsyncClient,
+        company: StockSymbol,
+        bsns_year: int,
+        reprt_code: str,
+        fs_div: str,
+    ) -> list[dict] | None:
+        """단일 fs_div(CFS/OFS) 재무 계정 목록을 조회. 데이터 없으면 None."""
+        params = {
+            "crtfc_key": settings.opendart_api_key,
+            "corp_code": company.corp_code,
+            "bsns_year": str(bsns_year),
+            "reprt_code": reprt_code,
+            "fs_div": fs_div,
+        }
+        response = await client.get(DART_FS_URL, params=params)
+        response.raise_for_status()
+        data = response.json()
+        if data.get("status") != "000":  # 013=데이터 없음 포함
+            return None
+        accounts: list[dict] = data.get("list", [])
+        return accounts or None
+
+    @staticmethod
+    def _extract_rcept_no(accounts: list[dict]) -> str | None:
+        # fnlttSinglAcntAll 응답의 각 계정 행에 동일 rcept_no가 실린다 — 첫 행에서 취함
+        for acc in accounts:
+            rcept_no = (acc.get("rcept_no") or "").strip()
+            if rcept_no:
+                return rcept_no
+        return None
 
     @staticmethod
     def _extract(
