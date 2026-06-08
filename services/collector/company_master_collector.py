@@ -13,7 +13,6 @@ import logging
 import xml.etree.ElementTree as ET
 import zipfile
 from dataclasses import dataclass
-from datetime import datetime
 
 import httpx
 from sqlalchemy import func, select
@@ -22,6 +21,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
 from app.db.orm_models.company_entity import CompanyEntity
+from utils.dates import now_kst
 
 logger = logging.getLogger(__name__)
 
@@ -87,7 +87,7 @@ async def sync_company_master(db: AsyncSession) -> dict[str, int]:
         — ON CONFLICT DO UPDATE는 insert/update를 구분하지 못하므로(둘 다 영향 행으로
         집계됨), 정확한 신규/갱신 건수 대신 동기화 전 기준 수치를 함께 반환한다.
     """
-    today = datetime.now().strftime("%Y%m%d")
+    today = now_kst().strftime("%Y%m%d")
 
     logger.info("DART corp_code 전체 다운로드 중...")
     corps = await fetch_dart_corp_codes()

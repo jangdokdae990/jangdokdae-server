@@ -1,11 +1,14 @@
 # 임베딩·클러스터링 기획서
 
-**작성일** 2026-05-28  
-**기획 범위** 전처리 완료 → 임베딩 생성 → 클러스터링 → 분석 파이프라인 인계  
-**관련 문서**  
-- [에이전트 오케스트레이션 아키텍처](./01-agent-orchestration-design.md)
-- [전처리 기획서](./04-preprocessing-design.md)
-- [기업 데이터 수집 기획서](./03-company-data-collection-design.md)
+> **작성자** Kim minkyoung · **작성일** 2026-05-28
+>
+> **범위** 전처리 완료 → 임베딩 생성 → 클러스터링 → 분석 파이프라인 인계
+>
+> **관련 문서**
+>
+> - [파이프라인 오케스트레이션](./01-pipeline-orchestration-design.md)
+> - [전처리 기획서](./04-preprocessing-design.md)
+> - [기업 데이터 수집 기획서](./03-company-data-collection-design.md)
 
 ---
 
@@ -16,9 +19,9 @@
 - [3. pgvector 인덱스 설정](#3-pgvector-인덱스-설정)
 - [4. 유사도 기반 중복 제거](#4-유사도-기반-중복-제거)
 - [5. 클러스터링 알고리즘 비교 및 선택](#5-클러스터링-알고리즘-비교-및-선택)
-- [6. 주요 이슈 선정 — 볼륨·속도 스코어](#6-주요-이슈-선정-—-볼륨·속도-스코어)
+- [6. 주요 이슈 선정 — 복합 중요도 스코어](#6-주요-이슈-선정--복합-중요도-스코어)
 - [7. RAG 소스 준비 — ReportChunk 임베딩](#7-rag-소스-준비-—-reportchunk-임베딩)
-- [8. EmbeddingClusteringAgent 설계](#8-embeddingclusteringagent-설계)
+- [8. EmbeddingClusterer 설계](#8-embeddingclusterer-설계)
 - [9. 임베딩 텍스트 정책 — 테이블별](#9-임베딩-텍스트-정책-—-테이블별)
 - [10. 구현 로드맵](#10-구현-로드맵)
 - [11. 미결 사항](#11-미결-사항)
@@ -43,7 +46,7 @@
 클러스터링 (같은 이슈 묶기)
     │
     ▼
-오늘의 주요 이슈 선정 (볼륨·속도 스코어)
+오늘의 주요 이슈 선정 (복합 중요도 스코어 → news_cluster 적재)
     │
     ▼
 분석 파이프라인 인계 (is_analyzed=False 레코드)
@@ -61,7 +64,7 @@
 
 | 테이블 | 트리거 | 용도 |
 |--------|--------|------|
-| `news` | `preprocessed_at IS NOT NULL AND embedding IS NULL` | 전처리 완료 후 임베딩 |
+| `news` | `is_filtered = FALSE AND embedding IS NULL` | 전처리 통과분 임베딩 (탈락분 `is_filtered=TRUE` 제외) |
 | `report_chunks` | `embedding IS NULL` | 사업보고서 RAG 소스 준비 (전처리 불필요) |
 
 ---
@@ -77,39 +80,48 @@
 
 #### 후보 모델 전체 비교
 
-| 모델 | 차원 | 운영 방식 | 한국어 | 금융 도메인 | MTEB-ko |
-|------|------|---------|--------|-----------|---------|
-| `text-multilingual-embedding-002` | 768 | Vertex AI (관리형) | ✅ | △ | 미공개 |
-| `BAAI/bge-m3` | 1024 | 로컬 / HuggingFace | ✅✅ | △ | **최상위권** |
-| `nlpai-lab/KURE-v1` | 768 | 로컬 / HuggingFace | ✅✅ | △ | **1위** (검색 특화) |
-| `jhgan/ko-sroberta-multitask` | 768 | 로컬 | ✅✅ | △ | 중상위 |
-| `FinKRX` | — | 미공개 | ✅✅ | ✅✅ | — |
+모델 선택은 두 축으로 본다 — **관리형(Vertex AI, 인프라 통일)** vs **오픈소스(한국어 특화 가능)**.
+
+| 모델 | 차원 | 운영 방식 | 한국어 | 금융 도메인 | 벤치마크 | 비고 |
+|------|------|---------|--------|-----------|---------|------|
+| `gemini-embedding-001` | 3072→768 (MRL) | Vertex AI (관리형) | ✅✅ | △ | **MTEB Multilingual 1위** | 관리형 유력 후보 |
+| `nlpai-lab/KURE-v1` | 1024 | 로컬 / HuggingFace | ✅✅ | △ | **MTEB-ko-retrieval 1위** | 오픈소스 유력 후보 |
+| `BAAI/bge-m3` | 1024 | 로컬 / HuggingFace | ✅✅ | △ | 최상위권 | KURE의 base |
+| `jhgan/ko-sroberta-multitask` | 768 | 로컬 | ✅✅ | △ | 중상위 | 현재 코드 기본값·baseline |
+| `text-multilingual-embedding-002` | 768 | Vertex AI (관리형) | ✅ | △ | 미공개 | **레거시** (gemini로 대체) |
+| `FinKRX` | — | 미공개 | ✅✅ | ✅✅ | — | 임베딩 버전 미공개 (LLM) |
+
+> **차원 주의**: `gemini-embedding-001`은 기본 3072이나 **Matryoshka(MRL)로 768·1536 무손실 절단** 가능 → 768로 잘라 쓰면 현재 `Vector(768)` 스키마 유지. 반면 `KURE-v1`·`bge-m3`는 **1024차원**이라 전환 시 `Vector(1024)` 스키마 변경 + 임베딩 전체 재계산이 필요하다.
 
 ---
 
 #### 모델별 상세
 
+**`gemini-embedding-001`** (Google, 2025.07 Vertex AI GA) — 관리형 유력 후보
+- `text-multilingual-embedding-002`의 후속. MTEB **Multilingual·English·Code 동시 1위** (Multilingual Task Mean 68.32)
+- 100+개 언어, 최대 입력 2048 토큰. **Matryoshka(MRL)** 로 3072→1536→768 무손실 절단
+- 768로 절단하면 **현재 `Vector(768)` 스키마 그대로** + Vertex/Gemini 인프라 통일 (별도 서버 불필요)
+- API 호출당 과금 (현재 기획서 기준 ~38~60회/일)
+
+**`nlpai-lab/KURE-v1`** (고려대학교 NLP&AI 연구실, 2024.12 공개) — 오픈소스 유력 후보
+- BGE-M3 기반으로 **한국어 검색에 특화** fine-tuning. 하드 네거티브 마이닝 적용
+- **MTEB-ko-retrieval 1위**, 특히 **장문 검색**에서 강점 → 사업보고서 RAG 청크 검색에 유리
+- 1024 차원 → 전환 시 `Vector(1024)` 스키마 변경 필요
+- 로컬 GPU 또는 HuggingFace Inference API 사용
+
 **`BAAI/bge-m3`**
-- 70개 언어 지원 다국어 모델. 한국어 MTEB retrieval F1 **0.35** (최상위권)
-- 단일 모델로 dense·sparse·multi-vector 세 가지 검색 방식 지원
-- HuggingFace 오픈소스, 로컬 GPU 또는 HuggingFace Inference API 사용
-- 1024 차원 → `Vector(1024)` 로 스키마 변경 필요
+- 70개 언어 지원 다국어 모델. KURE-v1의 base 모델
+- 단일 모델로 dense·sparse·multi-vector 세 가지 검색 방식 지원, 1024 차원
+- 한국어 단독 성능은 KURE-v1이 상회 → KURE-v1을 오픈소스 대표 후보로 둠
 
-**`nlpai-lab/KURE-v1`** (고려대학교 NLP&AI 연구실, 2024.12 공개)
-- BGE-M3 기반으로 **한국어 검색에 특화** fine-tuning
-- MTEB-ko-retrieval **1위** (Ko-StrategyQA 기준)
-- 768 차원, 현재 스키마 변경 없이 사용 가능
-- 한국어 multi-hop 질문 검색에서 강점 → 금융 뉴스 이슈 연결에 유리
+**`jhgan/ko-sroberta-multitask`** (baseline)
+- **현재 코드 기본값** ([.env.example](../../.env.example): `EMBED_MODEL=jhgan/ko-sroberta-multitask`)
+- KorNLI + KorSTS로 학습, 한국어 STS에서 안정적. 768 차원
+- 2021년 모델로 최신 모델 대비 성능 낮음 → **비교 baseline으로만 사용**
 
-**`jhgan/ko-sroberta-multitask`**
-- `.env.example`에 이미 기재된 모델. 가장 많이 검증된 한국어 임베딩
-- KorNLI + KorSTS로 학습. 한국어 STS(의미 유사도)에서 안정적
-- 2021년 모델로 최신 모델 대비 성능 낮을 수 있음
-
-**`text-multilingual-embedding-002`** (Vertex AI)
-- Vertex AI 기존 인프라 재사용 가능. 추가 서버 불필요
-- 한국어 포함 다국어 지원. MTEB-ko 공개 벤치마크 없어 품질 불확실
-- API 비용 발생 (현재 기획서 기준 ~38~60회/일)
+**`text-multilingual-embedding-002`** (Vertex AI) — 레거시
+- `gemini-embedding-001` 출시로 사실상 대체됨. MTEB-ko 공개 벤치마크 없어 품질 불확실
+- 신규 채택하지 않음 (gemini로 시작)
 
 **`FinKRX`** (원라인AI + 한국거래소, ACL 2025 등재)
 - 최초 한국 금융 특화 언어모델. 국내 금융 텍스트에 최적화
@@ -124,26 +136,31 @@
 |------|------------------|------------------|
 | 인프라 추가 | 없음 | GPU 서버 또는 HuggingFace API |
 | 비용 | API 호출당 과금 | 서버 고정비 또는 HF API 비용 |
-| 성능 한도 | 모델 품질 제한 | 한국어 특화 모델 사용 가능 |
+| 성능 한도 | gemini-embedding-001 = MTEB 다국어 1위 | KURE-v1 = 한국어 검색 특화 |
 | 유지보수 | 없음 | 모델 업데이트 관리 필요 |
+| 스키마 영향 | 768 절단 시 변경 없음 | 1024차원 → 스키마 변경 |
 
-> **초기 결정**: `text-multilingual-embedding-002`로 시작, 클러스터링 품질 검증 후 `KURE-v1` 또는 `bge-m3` 전환 여부 결정. 모델 변경 시 기존 임베딩 **전체 재계산** 필요하므로 초기에 신중히 선택.
+> **모델은 아직 미확정**이다. 위 비교는 후보 정리이며, 실제 장독대 데이터로 [§11 비교 하니스](#11-미결-사항)를 돌려 확정한다. 유력 후보는 관리형 `gemini-embedding-001`(768 절단 → 스키마 유지·Vertex 통일)과 오픈소스 `KURE-v1`(한국어 검색 1위, 1024). 모델 변경 시 기존 임베딩 **전체 재계산**이 필요하므로 **첫 배포 전 비교 테스트로 결정**한다.
 
 ---
 
-#### 현재 잠정 선택
+#### 후보 비교 축 (결정은 §11 테스트 이후)
 
 ```
-text-multilingual-embedding-002  ← 인프라 통일, 빠른 시작
-        ↓ 클러스터링 품질 테스트 후
-KURE-v1 또는 BGE-M3              ← 한국어 검색 품질 우선 시 전환
+gemini-embedding-001 (768 절단)  ← Vertex 인프라 통일, 스키마 유지, MTEB 다국어 1위
+        ↕  실데이터 비교 테스트(pair_auc·ARI·RAG recall)로 선택
+KURE-v1 (1024)                   ← 한국어 검색 1위, 장문 RAG 강점 (스키마 변경 동반)
+        +
+ko-sroberta-multitask (768)      ← 현재 코드 기본값, baseline
 ```
 
-환경 변수:
+환경 변수 (코드의 `EMBED_MODEL` 네이밍, **값은 테스트 후 확정**):
 ```
-EMBEDDING_MODEL=text-multilingual-embedding-002
-EMBEDDING_DIM=768
+EMBED_MODEL=<비교 테스트 후 확정>   # 후보: gemini-embedding-001 / nlpai-lab/KURE-v1
+EMBED_DIM=<모델에 따라 768 또는 1024>
 ```
+
+> **현재 코드 상태**: [.env.example](../../.env.example)는 `EMBED_MODEL=jhgan/ko-sroberta-multitask`(baseline), `EMBED_DIM` 없음, ORM `Vector(768)` 하드코딩. 모델 확정 시 `.env`·설정·스키마를 함께 갱신한다.
 
 ---
 
@@ -156,13 +173,34 @@ def build_embed_text(title: str) -> str:
     return title
 ```
 
-| 방식 | 장점 | 단점 |
-|------|------|------|
-| title만 **(채택)** | 저장 데이터 최소화, 저작권 안전 | 제목이 모호한 경우 클러스터링 품질 저하 |
-| title + snippet | 맥락 풍부 | snippet 저장 필요 → 저작권 리스크 |
-
-주식 뉴스 제목은 핵심 키워드 밀도가 높아 title만으로도 동일 이슈를 묶는 데 실용적으로 충분하다.  
+**채택: title 단독.** 주식 뉴스 제목은 핵심 키워드 밀도가 높아 title만으로도 동일 이슈를 묶는 데 실용적으로 충분하다.  
 (`"삼성전자 3분기 영업이익 9.2조"`, `"삼성전자 분기 실적 어닝서프라이즈"` → 같은 클러스터로 묶임)
+
+#### 본문을 클러스터링에 쓰지 않는 이유 — 비용 구조
+
+본문이 클러스터링 품질을 올릴 여지는 있으나, **클러스터링은 대표기사 선정 *이전* 단계**라 본문을 쓰려면 **당일 전체 기사**를 fetch해야 한다. 분석 단계(상위 ~10건만 fetch)와 비용 차수가 다르다.
+
+| 방식 | 본문 fetch 위치 | 일별 fetch 수 | 저장 | 리스크 |
+|------|--------------|-------------|------|--------|
+| **title만 (채택)** | 분석 단계 대표기사만 | **~10회/일** | 없음 | 제목 모호 시 품질 저하 |
+| title + feed summary | 없음 (RSS 응답 내 summary 메모리 사용) | 0회 추가 | 없음(메모리 후 폐기) | 피드별 summary 유무·길이 편차 |
+| title + 전체 본문 fetch | **클러스터링 단계 전체** | **~310회/일 (31배)** | 없음(메모리) | 페이월·타임아웃이 **임계 경로**에서 발생, 일 처리 지연 |
+
+> **저작권 제약 재확인**(→ [02 §3](./02-news-collection-design.md)): 본문·snippet은 **DB 저장 금지**. 어떤 방식이든 메모리에서 임베딩 후 폐기만 가능하다. feed summary 결합도 벡터만 남기고 원문은 저장하지 않는다.
+
+#### 구현 시 실험 (Phase 2, 클러스터링 구현 시점)
+
+title 단독으로 시작하되, 라벨셋으로 다음을 측정해 품질 부족이 확인되면 **feed summary 결합(중간안)** 으로 전환한다. 전체 본문 fetch는 비용·취약성 때문에 후순위.
+
+```python
+# 같은 라벨셋(같은이슈/다른이슈 쌍 50쌍씩)으로 입력 구성만 바꿔 비교
+VARIANTS = {
+    "title_only":      lambda n: n.title,
+    "title_summary":   lambda n: f"{n.title}. {n.feed_summary}",  # 메모리 한정, 미저장
+}
+# 평가: positive/negative cosine 분리도(AUC) + 사람 라벨 대비 ARI
+# → title_only로 valley 분리가 충분하면 그대로 확정, 부족하면 title_summary 채택
+```
 
 ---
 
@@ -176,7 +214,7 @@ from vertexai.language_models import TextEmbeddingModel
 EMBED_BATCH_SIZE = 50  # Vertex AI 최대 허용 배치 크기
 
 async def embed_batch(texts: list[str]) -> list[list[float]]:
-    model = TextEmbeddingModel.from_pretrained(settings.EMBEDDING_MODEL)
+    model = TextEmbeddingModel.from_pretrained(settings.EMBED_MODEL)
     # 50건씩 나눠서 호출
     results = []
     for i in range(0, len(texts), EMBED_BATCH_SIZE):
@@ -370,7 +408,9 @@ best_threshold = thresholds[f1_scores.argmax()]
 
 ---
 
-**② filter_confidence 임계값 (singleton 판별: 0.7)**
+**② filter_confidence 의미 검증 (상류 FilterChain 품질)**
+
+> singleton은 기본 보존(§5.4)하므로 confidence는 더 이상 singleton 판별 게이트가 아니다. 다만 상류 FilterChain(`is_filtered`)의 신뢰도가 실제 중요도와 일치하는지는 별도로 검증할 가치가 있다.
 
 FilterChain이 반환하는 `confidence` 값의 실제 의미를 검증한다.
 
@@ -407,7 +447,7 @@ for low, high in bins:
 1. 뉴스 수집 후 100~200건 샘플 확보
 2. 같은 이슈/다른 이슈 쌍 수동 레이블링 (50쌍씩)
 3. cosine similarity 분포 시각화 → 클러스터링·중복 제거 임계값 도출
-4. FilterChain 실행 → confidence 구간별 품질 평가 → singleton 임계값 도출
+4. FilterChain 실행 → confidence 구간별 품질 평가 → 상류 필터 신뢰도 검증
 5. HDBSCAN 실행 → 사람이 결과 평가 → Silhouette 기준 역산
 6. 도출된 값을 환경 변수에 반영
 ```
@@ -416,46 +456,37 @@ for low, high in bins:
 
 ---
 
-### 5.4 Singleton 처리 — 중요한 단독 이슈 vs 노이즈
+### 5.4 Singleton 처리 — 기본 보존 (단독 이슈는 고가치)
 
-HDBSCAN이 `-1` (noise)로 분류한 기사는 두 가지 경우다.
+HDBSCAN이 `-1` (noise)로 분류한 기사는 "한 이슈를 한 곳만 보도한 단독(singleton)"이다. **장독대는 이를 노이즈가 아니라 잠재적 고가치 이슈로 보고 기본 보존한다.**
 
-```
-noise (-1)
-  ├── 중요한 단독 이슈 (단 한 개 언론사만 보도한 단독)
-  └── 실제 노이즈 (금융 무관, 저품질 snippet)
-```
+**근거:**
 
-**구분 기준 — 2단계 판별:**
+1. **코퍼스가 이미 2중 정제됨** — 모든 기사가 ① 증권·경제 RSS 도메인, ② FilterChain 통과(`is_filtered=False`)를 거쳤다. 즉 noise(-1)는 "주제 무관 기사"가 아니라 "오늘 같은 이슈를 다른 곳이 안 쓴 기사"다 → 실제 이슈일 기저율이 높다.
+2. **단독 보도(exclusive)는 오히려 고가치** — 아직 시장에 퍼지지 않은 정보일 수 있어, 묻어버리면 안 된다.
+3. **노이즈 컷은 이미 상류에서 수행됨** — FilterChain(`is_filtered`)이 저품질·무관 기사를 거른다. 클러스터링 단계가 이를 또 거르는 건 과잉이며, 하드코딩 소스 리스트(매직값)도 불필요하다.
 
-#### 1단계: 소스 신뢰도
+**처리 방침 — size-1 클러스터로 편입:**
 
-```python
-# 주요 언론사 = 단독 보도여도 중요도 높음
-AUTHORITATIVE_SOURCES = {"hankyung", "edaily", "einfomax"}  # 주요 증권 언론사
-
-def is_authoritative_source(news: News) -> bool:
-    return news.source in AUTHORITATIVE_SOURCES
-```
-
-#### 2단계: LLM FilterChain 신뢰도 점수
+singleton을 버리거나 별도 분기로 특별 취급하지 않는다. **크기 1의 클러스터로 그대로 importance 스코어링(§6)에 편입**하고, 우선순위는 `TOP_ISSUE_COUNT` 컷오프가 결정하게 한다.
 
 ```python
-# 이미 FilterChain을 통과한 기사 → filter_confidence 활용
-def is_important_singleton(news: News, confidence_threshold: float = 0.7) -> bool:
-    return (
-        is_authoritative_source(news)
-        or news.filter_confidence >= confidence_threshold
-    )
+# noise(-1)도 각각 size-1 클러스터로 승격해 스코어링 대상에 포함
+def promote_singletons(labels: np.ndarray) -> np.ndarray:
+    next_id = labels.max() + 1
+    out = labels.copy()
+    for i in np.where(labels == -1)[0]:
+        out[i] = next_id
+        next_id += 1
+    return out  # 모든 기사가 클러스터에 소속 → 동일 기준으로 importance 경쟁
 ```
 
-**처리 방침:**
+| 케이스 | 처리 |
+|--------|------|
+| singleton (FilterChain 통과) | **size-1 클러스터로 보존** → importance 스코어링 → 상위면 분석 인계 |
+| 저품질·주제 무관 | 클러스터링 단계가 아니라 **상류 FilterChain(`is_filtered=True`)이 이미 제외** |
 
-| 케이스 | 판별 | 처리 |
-|--------|------|------|
-| 주요 언론사 + filter_confidence ≥ 0.7 | 중요한 단독 이슈 | **단독 클러스터로 보존**, 분석 파이프라인 인계 |
-| 주요 언론사 + filter_confidence < 0.7 | 단독 이슈 (중요도 낮음) | 보존하되 우선순위 낮음 |
-| 소형 언론사 + filter_confidence < 0.5 | 노이즈 가능성 높음 | 분석 제외 (`is_analyzed=True` 처리) |
+> **우선순위 부상 메커니즘**: singleton은 volume_n이 낮으므로(size 1), entity prominence(코스피200·시총)와 sentiment 강도로 부상한다(§6.1). "대형 종목의 단독 호재"는 entity·sentiment로 상위 진입하고, "소형주 잡음성 단독"은 자연히 컷오프 아래로 가라앉는다 — 임의 임계값 없이 스코어가 정렬한다.
 
 ---
 
@@ -499,46 +530,58 @@ def evaluate_clustering(
 
 ---
 
-### 5.6 min_cluster_size 선정
+### 5.6 min_cluster_size · min_samples 선정
 
-임계값 기반이 아닌 HDBSCAN을 사용하므로 핵심 파라미터는 `min_cluster_size`다.
+HDBSCAN의 결과는 **두 파라미터의 상호작용**으로 결정된다. 한쪽만 스윕하면 안 된다.
 
-**선정 방법:**
+| 파라미터 | 역할 | 올리면 |
+|---------|------|--------|
+| `min_cluster_size` | 클러스터로 인정할 최소 기사 수 | 클러스터 수↓, 큰 이슈만 남음 |
+| `min_samples` | 밀도 보수성(코어 포인트 기준). 클수록 경계 기사를 noise로 봄 | **noise↑**, 클러스터 더 조밀·보수적 |
+
+> `min_samples`를 명시하지 않으면 HDBSCAN은 `min_cluster_size`와 같은 값을 쓴다. 본 설계의 초기값 `min_samples=1`은 **가장 공격적(noise 최소)** 설정으로, singleton 기본 보존(§5.4)과도 잘 맞는다 — 일단 다 클러스터에 넣고 importance가 거르게 한다.
+
+**선정 방법 — 2D 그리드 스윕:**
 
 ```python
-# 다양한 min_cluster_size 값으로 실험
-for mcs in [2, 3, 4, 5]:
-    labels = cluster_news(embeddings, min_cluster_size=mcs)
-    metrics = evaluate_clustering(embeddings, labels)
-    print(f"mcs={mcs}: n_clusters={metrics['n_clusters']}, "
-          f"silhouette={metrics['silhouette']:.3f}, "
-          f"noise_ratio={metrics['noise_ratio']:.2%}")
+import numpy as np
+
+mcs_grid  = [2, 3, 4, 5]
+ms_grid   = [1, 2, 3, None]   # None = min_cluster_size와 동일(HDBSCAN 기본)
+
+print(f"{'mcs':>4} {'ms':>5} {'n_clusters':>11} {'silhouette':>11} {'noise':>7}")
+for mcs in mcs_grid:
+    for ms in ms_grid:
+        labels  = cluster_news(embeddings, min_cluster_size=mcs, min_samples=ms)
+        m       = evaluate_clustering(embeddings, labels)
+        sil     = f"{m['silhouette']:.3f}" if m['silhouette'] is not None else "  n/a"
+        print(f"{mcs:>4} {str(ms):>5} {m['n_clusters']:>11} {sil:>11} {m['noise_ratio']:>6.1%}")
 ```
 
-**기대 결과 패턴:**
+**해석 가이드 (결과표 읽는 법):**
 
-| min_cluster_size | 효과 |
-|----------------|------|
-| 2 | 클러스터 많음, noise 적음, 작은 이슈도 클러스터화 |
-| 3 | 균형점 (권장 시작값) |
-| 5 | 클러스터 적음, noise 많음, 주요 이슈만 클러스터화 |
+| 관찰 | 의미 | 조치 |
+|------|------|------|
+| noise_ratio > 60% | 너무 보수적 | `min_samples`↓ 또는 `min_cluster_size`↓ |
+| 거대 클러스터 1~2개에 쏠림 | 과합침(over-merge) | `min_samples`↑ |
+| n_clusters가 기사 수에 육박 | 과분할 | `min_cluster_size`↑ |
+| Silhouette < (§5.3에서 역산한 기준) | 경계 모호 | 두 값 조합 재탐색 |
 
-**초기값: `min_cluster_size=2`** — 같은 이슈를 2개 이상 언론사가 보도하면 클러스터 형성.  
-Silhouette Score < 0.3이면 값을 올리고, noise 비율 > 60%이면 값을 내린다.
+**초기값: `min_cluster_size=2`, `min_samples=1`** — 같은 이슈를 2개 이상 언론사가 보도하면 클러스터 형성, noise 최소화. 단독 기사는 §5.4에 따라 size-1 클러스터로 보존되므로 noise를 공격적으로 줄여도 정보 손실이 없다.
 
 ---
 
 ### 5.7 차원 축소 — 필요 여부 판단
 
 **현재 상황:**
-- `text-multilingual-embedding-002` / `KURE-v1`: **768차원**
-- `BGE-M3`: **1024차원**
+- `gemini-embedding-001`(768 절단): **768차원**
+- `KURE-v1` / `BGE-M3`: **1024차원**
 - HNSW 인덱스: 고차원에서도 효율적 (O(log n))
 - 일별 처리 대상: ~1,900건 → 거리 행렬 1,900×1,900 = ~14MB
 
 **결론: 768차원은 차원 축소 불필요.** HNSW가 충분히 처리한다.
 
-**1024차원(BGE-M3) 사용 시 성능 문제 발생하면:**
+**1024차원(KURE-v1·BGE-M3) 사용 시 성능 문제 발생하면:**
 
 ```python
 from sklearn.decomposition import PCA
@@ -585,35 +628,69 @@ print(f"최적 파라미터: {best_params}, Silhouette: {best_score:.3f}")
 
 ---
 
-### 5.8 대표 기사 선정
+### 5.8 대표 기사 선정 — 1건 + 중심 근접순 후보
+
+대표기사는 **1건**(`representative_news_id`)이다. 다만 분석 단계(06 §8.4)는 페이월·fetch 실패 시 **대체 기사를 순차 시도**하므로, `member_news_ids`를 **클러스터 중심 근접순으로 정렬 저장**한다. 그러면 스키마 변경 없이 ① 대표 1건, ② 실패 시 다음 후보 fallback, ③ 필요 시 상위 N건 다관점 입력을 모두 커버한다.
 
 ```python
-def select_representative(cluster_ids: list[int], embeddings: np.ndarray) -> int:
-    """클러스터 중심과 가장 가까운 기사 인덱스 반환"""
+def order_by_centrality(cluster_ids: list[int], embeddings: np.ndarray) -> list[int]:
+    """클러스터 중심에 가까운 순으로 기사 id 정렬.
+    [0]=대표기사, 이후=fetch fallback·다관점 후보 순서."""
     cluster_embeddings = embeddings[cluster_ids]
     centroid = cluster_embeddings.mean(axis=0)
     sims = cosine_similarity([centroid], cluster_embeddings)[0]
-    return cluster_ids[int(np.argmax(sims))]
+    order = np.argsort(sims)[::-1]            # 유사도 내림차순
+    return [cluster_ids[i] for i in order]
+
+# representative_news_id = ordered[0]
+# member_news_ids        = ordered  (정렬 보존)
 ```
+
+> **왜 1건인가**: 대표 3건 본문을 분석에 다 넣으면 LLM 토큰·fetch 비용이 3배이고 같은 이슈를 중복 서술할 위험이 크다. "중심 근접순 정렬 후보"가 동일 효용을 더 싸게 제공한다 — 분석은 [0]만 fetch하고, 막히면 [1], [2]로 내려간다.
 
 ---
 
 **환경 변수:**
 ```
 CLUSTER_MIN_CLUSTER_SIZE=2        # HDBSCAN min_cluster_size
-CLUSTER_MIN_SAMPLES=1             # HDBSCAN min_samples
+CLUSTER_MIN_SAMPLES=1             # HDBSCAN min_samples (noise 최소·singleton 보존)
 DEDUP_SIMILARITY_THRESHOLD=0.95   # 중복 제거 임계값
-SINGLETON_CONFIDENCE_THRESHOLD=0.7 # 중요 단독 이슈 판별 기준
 ```
+
+> singleton은 기본 보존(§5.4)하므로 `SINGLETON_CONFIDENCE_THRESHOLD`·하드코딩 소스 리스트는 두지 않는다.
 
 ---
 
-## 6. 주요 이슈 선정 — 볼륨·속도 스코어
+## 6. 주요 이슈 선정 — 복합 중요도 스코어
 
-클러스터링 완료 후 **오늘 분석할 이슈**를 선정한다.  
-클러스터링 완료 후 클러스터 크기와 속도를 기반으로 최종 스코어를 계산한다.
+클러스터링 완료 후 **오늘 분석할 이슈**를 복합 중요도 스코어로 선정한다. 이 선정은 **클러스터(같은 이슈로 묶인 기사 그룹) 단위 평가**이므로 임베딩·클러스터링이 끝난 뒤에야 가능하다 — 따라서 수집 단계(02)가 아니라 본 단계가 담당한다. 본 절이 신호 정의·가중치·구현의 **단일 출처**다.
+
+### 6.0 선정 방법론 — 벤치마크와 중요도 신호
+
+#### 타 서비스 벤치마크
+
+| 서비스 | 핵심 신호 | 로직 |
+|--------|----------|------|
+| **카카오 RUBICS** (2015~) | **Volume** | "1시간 동안 같은 이슈로 묶인 기사 수가 많을수록 주요 이슈". 클러스터 크기 상위 = 오늘의 주요 이슈. 실시간 클릭·체류로 순위 보정, 어뷰징(반복 송고) 필터링 |
+| **Bloomberg Terminal** | **Velocity** | 같은 종목에 기사가 갑자기 쏟아지면(속도 급증) 상단 노출. Top News(편집자)·감성 점수·AI 3줄 요약 병행 |
+
+#### 중요도 신호 5가지 (금융 뉴스 중요도 연구 공통)
+
+| 신호 | 정의 | 측정 방법 | 도입 |
+|------|------|----------|------|
+| **Volume** | 같은 이슈 기사 수 | 클러스터 내 기사 수 | MVP |
+| **Velocity** | 기사 발행 속도 | 단위 시간(1h)당 급증률 | MVP |
+| **Sentiment** | 긍정/부정 강도 | LLM / FinBERT 감성 점수 | MVP |
+| **Entity Prominence** | 언급 기업 중요도 | 코스피200 여부·시총 (→ [03](./03-company-data-collection-design.md)) | MVP |
+| **Social Signals** | SNS·검색 반응 | 구글 트렌드, 멘션 수 (pytrends 등 외부 API) | 확장 |
+
+장독대는 검증된 **Volume + Velocity**를 중심에 두고, **Sentiment·Entity Prominence**(MVP), **Social Signals**(확장)까지 복합 스코어에 반영한다.
+
+> **공식·가중치 출처 (중요)**: 이 가중합은 **학술 단일 출처가 없는 휴리스틱**이다. "볼륨·속도가 유효하다"는 근거는 벤치마크(RUBICS=볼륨, Bloomberg=속도)에서 왔고, **가중치 `wᵢ`는 초기 임의값**으로 실데이터 교정 전까지 확정값이 아니다(→ [§11](#11-미결-사항)).
 
 ### 6.1 스코어 계산
+
+각 신호를 [0,1]로 정규화해 가중합한다. **가중치는 휴리스틱 초기값이며 실데이터 교정 대상**이다(→ [§11](#11-미결-사항)). 스케일이 다른 raw 값(예: volume 50, velocity 1.2)을 그대로 더하면 한 신호가 지배하므로 반드시 정규화한다.
 
 ```python
 from dataclasses import dataclass
@@ -621,41 +698,63 @@ from dataclasses import dataclass
 @dataclass
 class ClusterScore:
     cluster_id: int
-    representative_news_id: int
-    volume: int          # 클러스터 내 기사 수
-    velocity: float      # 이전 수집 대비 증가율
-    final_score: float
+    representative_news_id: int   # = member_news_ids[0]
+    member_news_ids: list[int]   # 클러스터 소속 기사 id (중심 근접순 정렬, §5.8)
+    importance: float            # 복합 중요도 [0,1]
+
+# 가중치 — 휴리스틱 초기값(교정 전). 학술 단일 출처 없음(§6.0).
+W = {"volume": 0.4, "velocity": 0.3, "sentiment": 0.15, "entity": 0.15}
 
 def score_cluster(
-    cluster: list[int],
-    prev_cluster_size: int = 0,
+    cluster_size: int,
+    max_cluster_size: int,
+    prev_cluster_size: int,
+    sentiment_intensity: float,   # |감성| [0,1] (LLM/FinBERT)
+    entity_prominence: float,     # 코스피200·시총 기반 [0,1] (→ 03)
 ) -> float:
-    volume = len(cluster)
-    # velocity: 증가율 (이전 수집 기록 없으면 volume만 반영)
-    velocity = (volume - prev_cluster_size) / (prev_cluster_size + 1)
-    return volume * 0.6 + velocity * 0.4
+    volume_n   = cluster_size / max(max_cluster_size, 1)
+    # velocity: 증가율 (첫 실행 prev=0 → 0), [0,1] 클리핑
+    velocity_n = max(0.0, min((cluster_size - prev_cluster_size) / (prev_cluster_size + 1), 1.0))
+    return (
+        W["volume"]    * volume_n +
+        W["velocity"]  * velocity_n +
+        W["sentiment"] * sentiment_intensity +
+        W["entity"]    * entity_prominence
+    )   # Social Signals(구글 트렌드)는 확장 단계에 추가
 ```
 
-> `prev_cluster_size`가 없는 첫 실행에서는 velocity=0으로 처리해 volume만 반영한다.
+> Sentiment·Entity Prominence는 MVP 포함, Social Signals는 확장. 첫 실행은 `prev_cluster_size=0`이라 velocity_n=0.
 
-### 6.2 상위 이슈 선정
+### 6.2 상위 이슈 선정·영속화
+
+스코어링 결과는 `news_cluster` 테이블에 적재한다(클러스터당 1행 — 스키마는 [02 §8.3](./02-news-collection-design.md#83-news_cluster-테이블-클러스터링-산출물)). `embedding`은 `news`에 남고, 클러스터 식별·소속(`member_news_ids`)·`importance`만 분리 저장한다. 분석 단계는 이 테이블을 `importance` 내림차순으로 읽어 상위 이슈를 인계받는다.
 
 ```python
 TOP_ISSUE_COUNT = 10  # 분석 파이프라인에 넘길 최대 이슈 수
 
-def select_top_issues(scored_clusters: list[ClusterScore]) -> list[int]:
-    """스코어 상위 N개 클러스터의 대표 기사 ID 반환"""
-    sorted_clusters = sorted(
-        scored_clusters, key=lambda c: c.final_score, reverse=True
-    )
-    return [c.representative_news_id for c in sorted_clusters[:TOP_ISSUE_COUNT]]
+async def persist_clusters(
+    db: AsyncSession, run_date: date, scored_clusters: list[ClusterScore],
+) -> list[int]:
+    """클러스터를 news_cluster에 적재하고 상위 N개 대표 기사 ID 반환"""
+    for c in scored_clusters:
+        db.add(NewsCluster(
+            run_date=run_date,
+            representative_news_id=c.representative_news_id,
+            member_news_ids=c.member_news_ids,
+            size=len(c.member_news_ids),
+            importance=c.importance,
+        ))
+    await db.commit()
+
+    top = sorted(scored_clusters, key=lambda c: c.importance, reverse=True)
+    return [c.representative_news_id for c in top[:TOP_ISSUE_COUNT]]
 ```
 
 ---
 
 ## 7. RAG 소스 준비 — ReportChunk 임베딩
 
-사업보고서 청크(`report_chunks`)도 동일한 에이전트에서 임베딩한다.  
+사업보고서 청크(`report_chunks`)도 동일한 단계(EmbeddingClusterer)에서 임베딩한다.  
 이 임베딩이 분석 파이프라인의 `ImpactAnalysisChain`에 기업 컨텍스트(`related_companies`)를 제공한다.
 
 ### 7.1 임베딩 대상
@@ -674,7 +773,7 @@ LIMIT 100;
 from langchain_postgres.vectorstores import PGVector
 from langchain_google_vertexai import VertexAIEmbeddings
 
-embeddings = VertexAIEmbeddings(model_name=settings.EMBEDDING_MODEL)
+embeddings = VertexAIEmbeddings(model_name=settings.EMBED_MODEL)
 
 vectorstore = PGVector(
     embeddings=embeddings,
@@ -693,12 +792,12 @@ def get_company_context(company_name: str, k: int = 3) -> str:
 
 ---
 
-## 8. EmbeddingClusteringAgent 설계
+## 8. EmbeddingClusterer 설계
 
 ### 8.1 상태 (State)
 
 ```python
-class EmbeddingClusteringAgentState(TypedDict):
+class EmbeddingClustererState(TypedDict):
     # 처리 통계
     news_embedded: int        # 임베딩 생성된 뉴스 수
     chunks_embedded: int      # 임베딩 생성된 ReportChunk 수
@@ -723,7 +822,7 @@ class EmbeddingClusteringAgentState(TypedDict):
 | `embed_chunks` | `embedding=NULL` ReportChunk 배치 임베딩 |
 | `deduplicate` | cosine ≥ 0.95 중복 제거 |
 | `cluster` | cosine ≥ 0.80 이슈 클러스터링 |
-| `score_and_select` | 볼륨·속도 스코어 계산 → 상위 10개 이슈 선정 |
+| `score_and_select` | 복합 중요도 스코어 계산 → `news_cluster` 적재 → 상위 10개 이슈 선정 |
 | `mark_analyzed` | 선정된 기사 `is_analyzed=False` 확인 (분석 파이프라인 인계 준비) |
 
 ### 8.3 embed_news, embed_chunks 병렬 실행
@@ -731,7 +830,7 @@ class EmbeddingClusteringAgentState(TypedDict):
 두 임베딩 작업은 독립적이므로 병렬 처리한다.
 
 ```python
-async def run(self) -> EmbeddingClusteringAgentState:
+async def run(self) -> EmbeddingClustererState:
     # 임베딩 병렬 실행
     news_result, chunks_result = await asyncio.gather(
         self._embed_news(),
@@ -764,9 +863,9 @@ async def run(self) -> EmbeddingClusteringAgentState:
 | 3 | `news_embedder.py` 구현 (배치 임베딩) | `services/embedder/news_embedder.py` | Vertex AI 설정 |
 | 4 | `deduplicator.py` 유사도 중복 제거 추가 | `services/preprocessor/deduplicator.py` | 임베딩 완료 |
 | 5 | `cluster.py` 구현 (임계값 기반 클러스터링) | `services/embedder/cluster.py` | 임베딩 완료 |
-| 6 | `report_embedder.py` 구현 (ReportChunk) | `services/embedder/report_embedder.py` | dart-fss 수집 완료 |
+| 6 | `report_embedder.py` 구현 (ReportChunk) | `services/embedder/report_embedder.py` | 사업보고서 텍스트 수집 완료 (`report_collector`) |
 | 7 | LangChain PGVector 연동 | `app/llm/rag.py` | ReportChunk 임베딩 완료 |
-| 8 | `EmbeddingClusteringAgent` 조립 | `services/agents/embedding_clustering_agent.py` | 3~7 완료 |
+| 8 | `EmbeddingClusterer` 조립 | `services/pipeline/embedding_clusterer.py` | 3~7 완료 |
 | 9 | 통합 테스트 (실제 뉴스 100건) | — | 전체 파이프라인 완료 |
 
 ---
@@ -775,45 +874,84 @@ async def run(self) -> EmbeddingClusteringAgentState:
 
 | 항목 | 내용 | 결정 시점 |
 |------|------|----------|
-| **임베딩 모델 최종 확정** | 아래 비교 테스트 후 결정 | Phase 2 시작 전 |
-| 클러스터링 임계값 교정 | 실제 뉴스 100건으로 0.80 적정 여부 테스트 | Phase 구현 후 |
+| **임베딩 모델 최종 확정** | **미확정** — 아래 하니스로 후보(gemini-embedding-001 / KURE-v1 / ko-sroberta baseline) 비교 후 결정 | Phase 2 시작 전 |
+| **임베딩 텍스트 구성** | title 단독 시작. feed summary 결합(메모리 한정) 전환은 §2.2 실험으로 판단 | 클러스터링 구현 시 |
+| **스코어 가중치(W) 교정** | 신호별 가중치(현재 0.4/0.3/0.15/0.15 휴리스틱)를 실데이터로 튜닝. 학술 출처 없음 | Phase 구현 후 |
+| **Sentiment·Social 신호 통합** | Sentiment(LLM/FinBERT), Social(구글 트렌드 pytrends) 데이터 소스 연동 | MVP 이후 단계적 |
+| 클러스터링 임계값 교정 | 실제 뉴스 100건으로 0.80·(mcs, min_samples) 적정 여부 테스트(§5.6) | Phase 구현 후 |
 | TOP_ISSUE_COUNT | 상위 10개가 적절한지 서비스 기획과 조율 | 서비스 기획 논의 |
 | `prev_cluster_size` 추적 방법 | velocity 계산을 위한 이전 클러스터 크기 저장 방법 | cluster.py 구현 시 |
 | FinKRX 임베딩 버전 공개 여부 | LLM인지 임베딩 모델인지 확인, 공개 시 RAG 소스 임베딩에 적용 검토 | 모델 공개 후 |
 
-### 임베딩 모델 비교 테스트 방법
+### 임베딩 모델 비교 테스트 — 실행 하니스
 
-실제 장독대 뉴스 데이터로 다음 3개 모델을 비교한다.
+**원칙: 동일 라벨셋·동일 다운스트림에서 모델만 바꿔 끝까지 돌려 결과표 한 장으로 비교한다.** 모델별로 차원·정규화가 다르므로 cosine 분리도만 보지 말고 클러스터링·RAG까지 동일 조건으로 측정한다.
 
 ```python
-# 비교 대상
+# 비교 대상 — 관리형 1 + 오픈소스 2 (baseline 포함)
 CANDIDATE_MODELS = [
-    "text-multilingual-embedding-002",  # Vertex AI
-    "BAAI/bge-m3",                      # 다국어, MTEB-ko 최상위
-    "nlpai-lab/KURE-v1",                # 한국어 검색 특화, MTEB-ko 1위
+    "gemini-embedding-001",            # Vertex AI, 768 절단, MTEB Multilingual 1위 (관리형 후보)
+    "nlpai-lab/KURE-v1",               # 한국어 검색 특화, MTEB-ko 1위 (1024)
+    "jhgan/ko-sroberta-multitask",     # 현재 코드 기본값 — baseline
 ]
 
-# 평가 기준 1: 같은 이슈 기사 쌍 vs 다른 이슈 기사 쌍의 cosine similarity 분포
-# → 좋은 모델: 같은 이슈 쌍은 높게(≥0.80), 다른 이슈 쌍은 낮게(<0.60) 분리
-#
-# 평가 기준 2: 클러스터링 결과 정성 평가
-# → 100건 뉴스를 각 모델로 클러스터링 후, 클러스터가 실제로 같은 이슈를 묶는지 확인
-#
-# 평가 기준 3: RAG 검색 품질
-# → "삼성전자 반도체 수익성" 쿼리로 report_chunks 검색 시 관련 청크가 상위에 오는지 확인
+def embed_with(model_name: str, texts: list[str]) -> np.ndarray:
+    """모델별 임베딩. Vertex(gemini) vs HuggingFace(KURE·ko-sroberta) 분기."""
+    if model_name.startswith("gemini"):
+        from langchain_google_vertexai import VertexAIEmbeddings
+        emb = VertexAIEmbeddings(model_name=model_name)        # 768 절단 설정
+    else:
+        from langchain_huggingface import HuggingFaceEmbeddings
+        emb = HuggingFaceEmbeddings(model_name=model_name)
+    return np.array(emb.embed_documents(texts))
+
+# 사전 준비: 같은이슈/다른이슈 쌍 50쌍씩 + 사람이 매긴 클러스터 정답(gold_labels)
+def benchmark(model_name, news_texts, pos_idx, neg_idx, gold_labels):
+    from sklearn.metrics import roc_auc_score, adjusted_rand_score
+    X = embed_with(model_name, news_texts)
+    S = cosine_similarity(X)
+
+    # ① 분리도: 같은이슈 쌍 vs 다른이슈 쌍 cosine을 AUC로 (임계값 무관 단일 수치)
+    pos = [S[i, j] for i, j in pos_idx]
+    neg = [S[i, j] for i, j in neg_idx]
+    auc = roc_auc_score([1]*len(pos) + [0]*len(neg), pos + neg)
+
+    # ② 클러스터링: 동일 HDBSCAN 설정으로 돌려 사람 정답과 ARI 비교
+    labels = cluster_news(X, min_cluster_size=2, min_samples=1)
+    ari    = adjusted_rand_score(gold_labels, labels)
+    sil    = evaluate_clustering(X, labels)["silhouette"]
+
+    return {"model": model_name, "pair_auc": auc, "ari": ari, "silhouette": sil,
+            "pos_mean": np.mean(pos), "neg_mean": np.mean(neg)}
+
+results = [benchmark(m, news_texts, pos_idx, neg_idx, gold_labels) for m in CANDIDATE_MODELS]
+# 결과표로 정렬 출력 → pair_auc·ari 최고 모델 채택
 ```
 
-**모델 전환 비용 고려**: 모델 변경 시 `news`, `report_chunks` 테이블의 임베딩 전체 재계산 필요.  
+**③ RAG 검색 품질** (report_chunks 임베딩까지 영향): 동일 쿼리셋(예: `"삼성전자 반도체 수익성"`)으로 모델별 `similarity_search(k=5)` 후 관련 청크 **recall@5**를 사람이 채점해 비교.
+
+**결과표 양식:**
+
+| 모델 | pair_auc | ari | silhouette | pos_mean / neg_mean | RAG recall@5 |
+|------|---------|-----|-----------|--------------------|--------------|
+| gemini-embedding-001 | | | | | |
+| KURE-v1 | | | | | |
+| ko-sroberta (baseline) | | | | | |
+
+> **판정**: `pair_auc`·`ari`가 baseline 대비 유의하게 높고, gemini와 KURE 격차가 작으면 **스키마 유지·인프라 통일 이점이 있는 gemini-embedding-001 채택**. KURE가 RAG recall에서 크게 앞서면 1024 전환 비용을 감수하고 KURE 채택 검토.
+
+**모델 전환 비용 고려**: 모델 변경 시 `news`, `report_chunks` 테이블의 임베딩 전체 재계산 + (1024 모델은) `Vector` 차원 마이그레이션 필요.  
 초기에 잘못 선택하면 대규모 재작업 발생 → **첫 번째 배포 전에 반드시 결정**.
 
 ---
 
 ## 참고 자료
 
-- [`01-agent-orchestration-design.md`](./01-agent-orchestration-design.md) — EmbeddingClusteringAgent 상태·에러 처리
+- [`01-pipeline-orchestration-design.md`](./01-pipeline-orchestration-design.md) — EmbeddingClusterer 상태·에러 처리
 - [Neon pgvector 공식 문서](https://neon.com/docs/extensions/pgvector)
 - [LangChain PGVector](https://python.langchain.com/api_reference/postgres/vectorstores/langchain_postgres.vectorstores.PGVector.html)
 - [Vertex AI Text Embedding API](https://cloud.google.com/vertex-ai/generative-ai/docs/embeddings/get-text-embeddings)
+- [Gemini Embedding GA (Vertex AI·Gemini API, MTEB Multilingual 1위)](https://developers.googleblog.com/gemini-embedding-available-gemini-api/)
 - [KURE (고려대 한국어 임베딩 모델)](https://github.com/nlpai-lab/KURE)
 - [BGE-M3 (BAAI)](https://huggingface.co/BAAI/bge-m3)
 - [FinKRX (원라인AI + 한국거래소, ACL 2025)](https://www.venturesquare.net/971372)

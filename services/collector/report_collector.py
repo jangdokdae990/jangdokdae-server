@@ -15,6 +15,7 @@ import httpx
 
 from app.config import settings
 from services.collector.stock_symbols import StockSymbol
+from services.collector.tools.redact import redact_secrets
 from services.preprocessor.company_preprocessor import parse_report_sections
 
 logger = logging.getLogger(__name__)
@@ -52,8 +53,7 @@ class ReportCollector:
         companies: list[StockSymbol] | None = None,
         timeout: float = DEFAULT_TIMEOUT,
     ) -> None:
-        base = companies if companies is not None else []
-        self.companies = [c for c in base if c.corp_code]
+        self.companies = [c for c in (companies or []) if c.corp_code]
         self.timeout = timeout
 
     async def collect(self, bsns_year: int) -> list[CollectedReportChunk]:
@@ -67,7 +67,9 @@ class ReportCollector:
         for company, result in zip(self.companies, results):
             if isinstance(result, BaseException):
                 logger.error(
-                    "사업보고서 수집 실패 corp_code=%s err=%s", company.corp_code, result
+                    "사업보고서 수집 실패 corp_code=%s err=%s",
+                    company.corp_code,
+                    redact_secrets(result),
                 )
                 continue
             chunks.extend(result)
