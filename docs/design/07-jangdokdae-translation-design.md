@@ -1,10 +1,13 @@
 # 주린이 번역 기획서
 
-**작성일** 2026-05-28  
-**기획 범위** Issue Docent → 주린이 번역 콘텐츠 → 퀴즈 → 다음 이슈 추천  
-**관련 문서**  
-- [에이전트 오케스트레이션 아키텍처](./01-agent-orchestration-design.md)
-- [뉴스 분석 기획서](./06-news-analysis-design.md)
+> **작성자** Kim minkyoung · **작성일** 2026-05-28
+>
+> **범위** Issue Docent → 주린이 번역 콘텐츠 → 퀴즈 → 다음 이슈 추천
+>
+> **관련 문서**
+>
+> - [파이프라인 오케스트레이션](./01-pipeline-orchestration-design.md)
+> - [뉴스 분석 기획서](./06-news-analysis-design.md)
 
 ---
 
@@ -461,7 +464,7 @@ LIMIT 1;
 
 | 단계 | 내용 | 산출물 |
 |------|------|--------|
-| 12 | Issue Docent 발행 후 `TranslationChain` 자동 실행 연결 | `services/agents/news_analysis_agent.py` |
+| 12 | Issue Docent 발행 후 `TranslationChain` 자동 실행 연결 | `services/pipeline/news_analysis_agent.py` |
 | 13 | 본문 span ID 매핑 구조 확정 | 프론트엔드 협의 필요 |
 
 ---

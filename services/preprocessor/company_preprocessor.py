@@ -7,13 +7,7 @@ report_collector가 수집한 사업보고서 원문 XML을 사업의 내용/이
 
 import html
 import re
-
-# ── 추출 대상 섹션 (로마 숫자 TITLE 기준) ────────────────────────────────────
-_SECTION_MAP: dict[str, str] = {
-    "II. 사업의 내용":                   "business_summary",
-    "IV. 이사의 경영진단 및 분석의견":    "director_analysis",
-    "V. 회계감사인의 감사의견 등":        "audit_opinion",
-}
+from collections.abc import Callable
 
 _NOISE_PATTERNS = [
     re.compile(r"^☞"),
@@ -27,20 +21,24 @@ _ROMAN_PAT = re.compile(r"^\s*[IVXLCDM]+\.\s+.+$", re.IGNORECASE)
 _SUB_PAT = re.compile(r"^\s*\d+\.\s+.+$")
 
 
-def _extract_major_sections(xml_text: str) -> dict[str, str]:
-    """로마 숫자 대분류 TITLE 기준으로 XML을 섹션별로 분리."""
-    matches = list(_TITLE_PAT.finditer(xml_text))
+def _split_by_titles(xml_text: str, pattern: re.Pattern[str]) -> list[tuple[str, str]]:
+    """pattern에 맞는 TITLE 기준으로 XML을 (제목, 구간) 목록으로 분할."""
     candidates: list[tuple[str, int]] = []  # (title, start_pos)
-    for m in matches:
+    for m in _TITLE_PAT.finditer(xml_text):
         text = re.sub(r"\s+", " ", m.group(1)).strip()
-        if _ROMAN_PAT.match(text):
+        if pattern.match(text):
             candidates.append((text, m.start()))
 
-    sections: dict[str, str] = {}
+    result: list[tuple[str, str]] = []
     for i, (title, start) in enumerate(candidates):
-        end: int = candidates[i + 1][1] if i + 1 < len(candidates) else len(xml_text)
-        sections[title] = xml_text[start:end]
-    return sections
+        end = candidates[i + 1][1] if i + 1 < len(candidates) else len(xml_text)
+        result.append((title, xml_text[start:end]))
+    return result
+
+
+def _extract_major_sections(xml_text: str) -> dict[str, str]:
+    """로마 숫자 대분류 TITLE 기준으로 XML을 섹션별로 분리."""
+    return dict(_split_by_titles(xml_text, _ROMAN_PAT))
 
 
 def _xml_to_lines(section_xml: str) -> list[str]:
@@ -85,25 +83,10 @@ def _preprocess_audit_opinion(xml: str) -> str:
 
 def _extract_subsections(section_xml: str) -> list[tuple[str, str]]:
     """아라비아 숫자 소제목(TITLE) 기준으로 분할. 없으면 [("", section_xml)]."""
-    matches = list(_TITLE_PAT.finditer(section_xml))
-    candidates: list[tuple[str, int]] = []  # (title, start_pos)
-    for m in matches:
-        text = re.sub(r"\s+", " ", m.group(1)).strip()
-        if _SUB_PAT.match(text):
-            candidates.append((text, m.start()))
-
-    if not candidates:
-        return [("", section_xml)]
-
-    result: list[tuple[str, str]] = []
-    for i, (title, start) in enumerate(candidates):
-        end: int = candidates[i + 1][1] if i + 1 < len(candidates) else len(section_xml)
-        result.append((title, section_xml[start:end]))
-    return result
+    return _split_by_titles(section_xml, _SUB_PAT) or [("", section_xml)]
 
 
-_Preprocessor = object  # callable 타입을 위한 alias (mypy strict 회피)
-_PREPROCESSORS: dict[str, tuple[str, _Preprocessor]] = {
+_PREPROCESSORS: dict[str, tuple[str, Callable[[str], str]]] = {
     "II. 사업의 내용":                  ("business_summary",  _preprocess_business),
     "IV. 이사의 경영진단 및 분석의견":   ("director_analysis", _preprocess_director_analysis),
     "V. 회계감사인의 감사의견 등":       ("audit_opinion",     _preprocess_audit_opinion),
@@ -119,14 +102,14 @@ def parse_report_sections(xml_text: str) -> dict[str, list[dict[str, str]]]:
     raw_sections = _extract_major_sections(xml_text)
     result: dict[str, list[dict[str, str]]] = {}
 
-    for title, (chunk_type, fn) in _PREPROCESSORS.items():  # type: ignore[misc]
+    for title, (chunk_type, fn) in _PREPROCESSORS.items():
         xml = raw_sections.get(title, "")
         if not xml:
             result[chunk_type] = []
             continue
         chunks = []
         for subsection, sub_xml in _extract_subsections(xml):
-            content = fn(sub_xml)  # type: ignore[operator]
+            content = fn(sub_xml)
             if content.strip():
                 chunks.append({"subsection": subsection, "content": content})
         result[chunk_type] = chunks

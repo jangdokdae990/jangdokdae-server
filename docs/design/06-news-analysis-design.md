@@ -1,11 +1,14 @@
 # 뉴스 분석 기획서
 
-**작성일** 2026-05-28  
-**기획 범위** 클러스터링 완료 → 뉴스 분류 → 콘텐츠 생성 → Issue Docent  
-**관련 문서**  
-- [에이전트 오케스트레이션 아키텍처](./01-agent-orchestration-design.md)
-- [뉴스 수집 기획서](./02-news-collection-design.md)
-- [임베딩·클러스터링 기획서](./05-embedding-clustering-design.md)
+> **작성자** Kim minkyoung · **작성일** 2026-05-28
+>
+> **범위** 클러스터링 완료 → 뉴스 분류 → 콘텐츠 생성 → Issue Docent
+>
+> **관련 문서**
+>
+> - [파이프라인 오케스트레이션](./01-pipeline-orchestration-design.md)
+> - [뉴스 수집 기획서](./02-news-collection-design.md)
+> - [임베딩·클러스터링 기획서](./05-embedding-clustering-design.md)
 
 ---
 
@@ -559,7 +562,9 @@ class IssueDocent(Base):
 
 ## 18. NewsAnalysisAgent 설계
 
-`NewsAnalysisAgent`는 `EmbeddingClusteringAgent` 완료 후 트리거되는 LangGraph 기반 에이전트다.
+`NewsAnalysisAgent`는 `EmbeddingClusterer` 완료 후 트리거되는 LangGraph 기반 에이전트로, [2계층 오케스트레이션 모델](./00-workflow-airflow.md#2계층-오케스트레이션-모델)의 **L2 — AI 에이전트 오케스트레이션**에 해당한다. 파이프라인에서 LLM이 흐름을 판단하는 **유일한 단계**다(나머지 수집~임베딩은 L1 정형 Airflow Task → [00](./00-workflow-airflow.md), [01](./01-pipeline-orchestration-design.md)).
+
+도입은 **단계적**으로 한다 — 18.1·18.2는 **MVP 단일 에이전트** 설계, [18.3](#183-멀티-에이전트-오케스트레이션-슈퍼바이저-워커--승급-설계)은 품질이 단일 에이전트로 부족할 때의 **멀티 에이전트(슈퍼바이저-워커)** 승급 설계다.
 
 ### 18.1 에이전트 도구 (Tools)
 
@@ -607,6 +612,34 @@ workflow.add_edge("enqueue_review",   "publish")
 workflow.add_edge("publish",          END)
 ```
 
+### 18.3 멀티 에이전트 오케스트레이션 (슈퍼바이저-워커) — 승급 설계
+
+18.2의 단일 에이전트로 도슨트 품질(용어 해설 누락·환각·맥락 부족)이 부족할 때, IBM의 **계층적 분해(hierarchical manager-worker)** 패턴으로 승급한다. **슈퍼바이저**가 "이 이슈로 주린이용 도슨트 생성"을 하위 작업으로 분해해 **워커**에 위임하고, 결과를 종합한다.
+
+```
+        ┌──────────── Docent Supervisor (매니저) ────────────┐
+        │   작업 분해 · 워커 위임 · 결과 종합 · 게이트         │
+        └───┬────────┬────────┬────────┬────────┬────────────┘
+            ▼        ▼        ▼        ▼        ▼
+        이슈요약  용어해설  종목·기업  배경·맥락  품질검증
+         worker   worker  연결(RAG)   worker    worker
+                          worker
+        └─ 요약·용어·종목·맥락은 병렬 → 품질검증이 종합·게이트 ─┘
+```
+
+| 워커 | 단일 책임 | 비고 |
+|------|----------|------|
+| 이슈요약 | 클러스터 뉴스를 핵심으로 압축 | 멘토 "10줄 이내" |
+| 용어해설 | 주린이가 모를 용어를 쉬운 말로 | 장독대 차별점 |
+| 종목·기업 연결(RAG) | pgvector에서 관련 공시·재무 검색·연결 | 벡터DB에 없으면 "확실치 않음"(멘토 RAG 엣지케이스) |
+| 배경·맥락 | 왜 중요한 이슈인지 풀이 | |
+| 품질검증(verifier) | 원문 뉘앙스 보존·환각 검증 → 통과/재생성 | 멘토 LLM 출력 품질 |
+
+- **패턴**: 워커는 **병렬** 실행, 슈퍼바이저는 **계층적 종합**(IBM manager-worker).
+- **단일 책임**: 워커 1개 = 작업 1개 (멘토 "한 번 호출엔 하나의 task").
+- **승급 기준**: 단일 에이전트 품질이 임계 미달일 때 **약한 부분만** 전용 워커로 분리 → "왜 멀티 에이전트인가"를 품질 데이터로 정당화(포트폴리오 내러티브).
+- **주의**: 멀티 에이전트는 토큰·지연·디버깅 비용이 크다(멘토 "과도한 최적화 불필요"). **MVP는 18.2 단일 에이전트로 시작**한다.
+
 ---
 
 ## 19. 구현 로드맵
@@ -618,14 +651,14 @@ workflow.add_edge("publish",          END)
 | 1 | L1·L2 분류 프롬프트 작성 (충돌 처리 룰 포함) | `prompts/news_classify.yaml` |
 | 2 | L3 태그 추출 프롬프트 작성 | `prompts/news_tag_extract.yaml` |
 | 3 | `NewsAnalysis` 테이블 생성 | `app/db/models.py` + Alembic |
-| 4 | `classify_tool` 구현 | `services/agents/tools/classify_tool.py` |
+| 4 | `classify_tool` 구현 | `services/pipeline/tools/classify_tool.py` |
 
 ### Phase 2 — 콘텐츠 생성
 
 | 단계 | 내용 | 산출물 |
 |------|------|--------|
 | 5 | L2별 본문 생성 프롬프트 6개 작성 | `prompts/news_analysis_*.yaml` |
-| 6 | `generate_content_tool` 구현 | `services/agents/tools/` |
+| 6 | `generate_content_tool` 구현 | `services/pipeline/tools/` |
 | 7 | 주린이 번역 톤 검증 (샘플 50건) | 수동 검토 |
 
 ### Phase 3 — Issue Docent & 퀴즈
@@ -633,16 +666,16 @@ workflow.add_edge("publish",          END)
 | 단계 | 내용 | 산출물 |
 |------|------|--------|
 | 8 | `IssueDocent` 테이블 생성 | `app/db/models.py` |
-| 9 | 연결 모듈 빌더 구현 | `services/agents/tools/build_connection_tool.py` |
+| 9 | 연결 모듈 빌더 구현 | `services/pipeline/tools/build_connection_tool.py` |
 | 10 | 퀴즈 생성 프롬프트 작성 | `prompts/quiz_checkpoint.yaml` |
-| 11 | `generate_quiz_tool`, `publish_docent_tool` 구현 | `services/agents/tools/` |
+| 11 | `generate_quiz_tool`, `publish_docent_tool` 구현 | `services/pipeline/tools/` |
 
 ### Phase 4 — NewsAnalysisAgent 통합
 
 | 단계 | 내용 | 산출물 |
 |------|------|--------|
-| 12 | `NewsAnalysisAgent` LangGraph 구현 | `services/agents/news_analysis_agent.py` |
-| 13 | MasterOrchestrator에 연결 | `services/master_orchestrator.py` |
+| 12 | `NewsAnalysisAgent` LangGraph 구현 | `services/pipeline/news_analysis_agent.py` |
+| 13 | Airflow 메인 DAG의 `analyze` Task로 연결 (+ `run_pipeline()`) | `dags/jangdokdae_pipeline.py`, `services/pipeline/runner.py` |
 | 14 | 검수 큐 관리 API | `app/api/review_queue.py` |
 
 ---
@@ -676,7 +709,7 @@ workflow.add_edge("publish",          END)
 | 항목 | 내용 | 결정 시점 |
 |------|------|----------|
 | 분류 신뢰도 임계값 | 검수 큐 진입 기준값 (예: 0.7 미만) | Phase 1 테스트 후 |
-| 클러스터 → Docent 발행 기준 | 클러스터 최소 기사 수, 볼륨 스코어 하한 | Phase 3 구현 전 |
+| 클러스터 → Docent 발행 기준 | `importance` 상위(TOP_ISSUE_COUNT) 기준 인계가 정본(→ [05 §6.2](./05-embedding-clustering-design.md#62-상위-이슈-선정영속화)). 단독(singleton)도 size-1 클러스터로 보존·스코어링되므로 **최소 기사 수 하한은 두지 않음**(→ [05 §5.4](./05-embedding-clustering-design.md#54-singleton-처리--기본-보존-단독-이슈는-고가치)). Docent 발행에 추가 하한이 필요한지만 검토 | Phase 3 구현 전 |
 | term_tags 초기 사전 범위 | 용어 사전 초기 등록 목록 | Phase 2 전 |
 | 퀴즈 오답 선택지 자동 생성 방법 | LLM 생성 vs 사전 정의 오답 풀 | Phase 3 구현 전 |
 | 검수 큐 운영 주체 | 자동 재분류 시도 vs 수동 검수 | 서비스 오픈 전 |

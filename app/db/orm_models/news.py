@@ -25,9 +25,11 @@ class News(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=False), server_default=KST_NOW, nullable=False
     )
+    # DEPRECATED: 인메모리 전처리 전환으로 미사용(항상 NULL). 더는 읽거나 쓰지 않으며
+    # 임베딩 단계 구현 시 다른 스키마 변경과 함께 마이그레이션으로 제거한다(→ 설계 04 §7).
     preprocessed_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=False), nullable=True
-    )  # NULL=미처리 (KST)
+    )
     # 전처리에서 분석 대상에서 제외됨(24h 초과·제목 중복). True면 임베딩·분석 스킵.
     # is_analyzed(분석 완료)와 구분 — 통과율 집계 시 의미 오염 방지
     is_filtered: Mapped[bool] = mapped_column(

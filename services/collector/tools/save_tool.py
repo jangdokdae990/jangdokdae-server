@@ -34,7 +34,10 @@ _MAX_BIND_PARAMS = 30000
 
 
 def _chunks(records: list[dict], max_params: int | None = None) -> Iterator[list[dict]]:
-    """records를 INSERT 파라미터 한계(행×컬럼) 이하 청크로 분할. 호출자가 비어있지 않음을 보장."""
+    """records를 INSERT 파라미터 한계(행×컬럼) 이하 청크로 분할. 호출자가 비어있지 않음을 보장.
+
+    max_params는 테스트에서 작은 한계값을 주입하기 위한 시드(seam)다.
+    """
     limit = _MAX_BIND_PARAMS if max_params is None else max_params
     chunk_size = max(1, limit // len(records[0]))
     for start in range(0, len(records), chunk_size):

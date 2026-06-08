@@ -1,10 +1,13 @@
 # 뉴스 데이터 수집 기획서
 
-**작성일** 2026-05-28  
-**기획 범위** 뉴스 수집 → 전처리 → 임베딩  
-**관련 문서**  
-- [에이전트 오케스트레이션 아키텍처](./01-agent-orchestration-design.md)
-- [전처리 기획서](./04-preprocessing-design.md)
+> **작성자** Kim minkyoung · **작성일** 2026-05-28
+>
+> **범위** 뉴스 수집 → 전처리 → 임베딩
+>
+> **관련 문서**
+>
+> - [파이프라인 오케스트레이션](./01-pipeline-orchestration-design.md)
+> - [전처리 기획서](./04-preprocessing-design.md)
 
 ---
 
@@ -15,8 +18,8 @@
 - [3. 저작권 및 법적 검토](#3-저작권-및-법적-검토)
 - [4. 수집 소스 검토](#4-수집-소스-검토)
 - [5. 수집 방법](#5-수집-방법)
-- [6. 주요 뉴스 선정 방법론](#6-주요-뉴스-선정-방법론)
-- [7. 뉴스 수집 에이전트](#7-뉴스-수집-에이전트)
+- [6. 주요 뉴스 선정 — 클러스터링 단계 담당](#6-주요-뉴스-선정--클러스터링-단계-담당)
+- [7. 뉴스 수집 단계](#7-뉴스-수집-단계)
 - [8. 데이터 명세](#8-데이터-명세)
 - [9. 수집 주기](#9-수집-주기)
 - [10. 시스템 아키텍처](#10-시스템-아키텍처)
@@ -67,24 +70,27 @@
 
 ## 2. 수집 대상 정의
 
-### 2.1 뉴스 유형 분류
+### 2.1 수집 대상
 
-| 유형 | 설명 | 예시 |
-|------|------|------|
-| **시장 뉴스** | 코스피·코스닥·금리·환율 등 거시 경제 이슈 | "한국은행 기준금리 동결 결정" |
-| **종목 뉴스** | 특정 기업·산업 관련 뉴스 | "삼성전자 3분기 영업이익 발표" |
+16개 고정 RSS 피드(국내 증권 전문 13 + 글로벌 investing.com 3, → [4장](#4-수집-소스-검토))에서 들어오는 **증권·경제 뉴스 전체**를 수집한다. 키워드 검색이나 종목별 동적 수집을 하지 않으므로, 시장 이슈·개별 종목·산업 뉴스가 **구분 없이 섞여** 들어온다.
 
-### 2.2 수집 범위
+| 들어오는 뉴스 성격 | 예시 |
+|------|------|
+| 시장·거시 | "한국은행 기준금리 동결 결정" |
+| 개별 기업·종목 | "삼성전자 3분기 영업이익 발표" |
+| 산업·테마 | "AI 데이터센터 수요로 HBM 공급 부족" |
 
-```
-국내
-  시장 뉴스  →  코스피, 코스닥, 금리, 환율, 반도체, 2차전지 등 키워드
-  종목 뉴스  →  사용자 관심 종목 기반 동적 수집
+> 이 성격(시장/종목/산업)은 **수집 시점에 분류하지 않는다.** 고정 RSS에는 라벨이 없으므로, 유형 분류(L1)와 종목 식별(`company_tags`)은 **분석 단계**가 담당한다(→ [06](./06-news-analysis-design.md)).
 
-해외
-  시장 뉴스  →  Fed, S&P500, NASDAQ, 유가 등 글로벌 거시 키워드
-  종목 뉴스  →  관심 해외 종목 ticker 기반 수집
-```
+### 2.2 수집 범위와 경계
+
+| 항목 | 내용 |
+|------|------|
+| 범위 결정 방식 | **피드 선택**으로 결정 (키워드·종목 쿼리 없음) |
+| 국내 | 국내 증권 전문 RSS 13개 (코스피·코스닥·기업·산업 뉴스 혼재) |
+| 해외 | investing.com RSS 3개 (외환·해외 주식시장·경제지표) |
+| 종목 커버리지 | 수집 단계에서 종목을 지정하지 않음 — 분석 단계 Entity NER가 본문에서 기업을 추출 (→ [5.2](#52-피드-운영-전략)) |
+| 수집 안 함 | 본문·snippet·이미지 (저작권, → [3장](#3-저작권-및-법적-검토)) |
 
 ---
 
@@ -239,126 +245,57 @@ async def run_collection() -> list[dict]:
 
 피드 추가·제거는 상수 목록만 수정하면 되므로 코드 변경 없이 운영 가능하다.
 
-## 6. 주요 뉴스 선정 방법론
+## 6. 주요 뉴스 선정 — 클러스터링 단계 담당
 
-수집한 뉴스 전체를 분석 파이프라인에 넘기는 것은 비효율적이다. **"오늘 주목해야 할 뉴스"를 어떻게 선정할 것인가**는 서비스 품질을 결정하는 핵심 문제다.
+> **선정 로직은 수집 단계가 아니라 임베딩·클러스터링 단계(05)가 담당한다.**
 
-### 6.1 타 서비스 벤치마크
+"오늘 주목해야 할 뉴스"를 고르는 일은 **클러스터(같은 이슈로 묶인 기사 그룹)** 단위 평가이므로, 임베딩·클러스터링이 끝난 뒤에야 가능하다. 따라서 수집 단계(`NewsCollector`)는 **수집·저장만** 하고, 클러스터링·복합 중요도 스코어링·상위 이슈 선정은 `EmbeddingClusterer`가 수행한다.
 
-#### 카카오 루빅스 (RUBICS)
+| 관심사 | 담당 단계 | 문서 |
+|--------|----------|------|
+| 뉴스 수집·저장 | NewsCollector (수집) | 본 문서 [7장](#7-뉴스-수집-단계) |
+| 클러스터링·복합 중요도 스코어·상위 이슈 선정 | EmbeddingClusterer (임베딩·클러스터링) | [05 §6](./05-embedding-clustering-design.md#6-주요-이슈-선정--복합-중요도-스코어) |
 
-카카오가 2015년 도입한 실시간 뉴스 추천 시스템. 가장 참고할 만한 국내 사례다.
-
-> **핵심 로직**: "1시간 동안 같은 이슈로 묶인 기사 수가 많은 이슈를 주요 이슈로 선정한다"
-
-기자들이 많이 쓴 주제 = 세상이 주목하는 이슈라는 논리다.
-
-```
-수집 → 클러스터링(유사 기사 묶기) → 클러스터 크기(기사 수) → 상위 6개 = 오늘의 주요 이슈
-```
-
-추가로 **실시간 사용자 반응**(클릭률, 체류 시간)을 반영해 순위를 조정한다. 또한 어뷰징(동일 기사 반복 송고) 필터링으로 인위적 볼륨 증폭을 차단한다.
+벤치마크(RUBICS·Bloomberg), 중요도 신호 5가지, 가중치 근거(휴리스틱·교정 대상)는 모두 [05 §6](./05-embedding-clustering-design.md#6-주요-이슈-선정--복합-중요도-스코어)을 단일 출처로 한다.
 
 ---
 
-#### Bloomberg Terminal
+## 7. 뉴스 수집 단계
 
-금융 전문 단말기. 알고리즘과 편집자를 함께 사용한다.
+> 파이프라인 오케스트레이션 전체 설계는 [`01-pipeline-orchestration-design.md`](./01-pipeline-orchestration-design.md) 참조.
 
-| 기능 | 방식 |
-|------|------|
-| **Top News** | 편집자가 직접 선별한 하루 핵심 뉴스 |
-| **First Word** | 속보를 bullet point로 즉시 요약 |
-| **감성 점수** | 뉴스별 긍정/부정 수치 제공 |
-| **AI 3줄 요약** | 중요 기사를 자동으로 3문장 요약 |
+`NewsCollector`는 Airflow 메인 DAG가 09:00, 15:30에 실행하는 **수집 전용** 컴포넌트다. RSS 폴링·정규화·저장(`collect → save`)만 수행하고, 클러스터링·스코어링은 후속 단계([05 EmbeddingClusterer](./05-embedding-clustering-design.md#8-embeddingclusterer-설계))가 담당한다. `collect → save`는 분기·반복 없는 **정적 순차**이고 흐름 제어에 LLM 추론이 없으므로 실행 골격은 **Airflow Task**다(→ [00-workflow-airflow.md 5.2](./00-workflow-airflow.md#52-뉴스-수집-정적-순차--airflow-task로-교정)).
 
-블룸버그는 **속도(velocity)** 를 핵심 신호로 쓴다. 같은 종목에 기사가 갑자기 쏟아지면 상단에 노출된다.
-
----
-
-#### 학술 연구 기반 — 중요도 신호 5가지
-
-금융 뉴스 중요도 연구에서 공통적으로 등장하는 신호:
-
-| 신호 | 정의 | 측정 방법 |
-|------|------|----------|
-| **Volume** | 같은 이슈 기사 수 | 클러스터 내 기사 수 |
-| **Velocity** | 기사 발행 속도 | 단위 시간(1h)당 급증률 |
-| **Sentiment** | 긍정/부정 강도 | FinBERT 감성 점수 |
-| **Entity Prominence** | 언급된 기업 중요도 | 코스피200 여부, 시총 |
-| **Social Signals** | SNS·검색 반응 | 구글 트렌드, 트위터 멘션 수 |
-
-장독대 MVP에서는 **Volume + Velocity** 3가지로 시작하고, 이후 Sentiment·Entity Prominence를 추가한다.
-
----
-
-### 6.2 장독대 주요 뉴스 선정 로직
-
-벤치마크 조사를 바탕으로 3단계 선정 로직을 채택한다.
-
-```
-[1단계] 볼륨 스코어링
-  수집된 뉴스를 클러스터링 → 클러스터 크기(기사 수) = 이슈 볼륨 점수
-  → 볼륨이 높을수록 많은 기자가 주목한 이슈
-
-[2단계] 속도 스코어링
-  이전 수집 대비 클러스터 증가율 계산
-  → 급격히 커지는 클러스터 = 지금 터지고 있는 이슈
-
-[3단계] LLM 최종 판단
-  상위 클러스터를 FilterChain에 통과
-  → "주린이에게 중요한가?" 최종 판단
-  → 통과한 클러스터 = Issue Docent 생성 대상
-```
-
-```python
-def score_cluster(cluster: list[News], prev_cluster_size: int) -> float:
-    volume_score   = len(cluster)                              # 기사 수
-    velocity_score = len(cluster) - prev_cluster_size          # 증가 속도
-    return volume_score * 0.6 + velocity_score * 0.4
-```
-
----
-
-## 7. 뉴스 수집 에이전트
-
-> 에이전트 오케스트레이션 전체 설계는 [`01-agent-orchestration-design.md`](./01-agent-orchestration-design.md) 참조.
-
-`NewsCollectionAgent`는 `MasterOrchestrator`가 09:00, 15:30에 실행하는 LangGraph 기반 에이전트다.
-
-### 7.1 에이전트 도구 (Tools)
+### 7.1 도구 (Tools)
 
 | 도구 | 역할 |
 |------|------|
-| `search_tool(keyword, region)` | Google RSS / Naver / Finnhub 검색 |
-| `cluster_tool(news_list)` | pgvector cosine similarity로 이슈 클러스터링 |
-| `score_tool(clusters)` | 볼륨(기사 수) + 속도(증가율) 점수 계산 |
-| `save_tool(news_list)` | News 테이블 UPSERT |
+| `rss_tool()` | feedparser로 **16개 고정 RSS 피드 폴링·정규화·URL 중복 제거** (키워드 검색 아님) |
+| `save_tool(news_list)` | News 테이블 UPSERT (`ON CONFLICT(url) DO NOTHING`) |
 
-### 7.2 에이전트 플로우 (LangGraph)
+> `cluster_tool`·`score_tool`은 수집 단계 도구가 아니다. 클러스터링·스코어링은 05 EmbeddingClusterer가 소유한다(→ [01 §4](./01-pipeline-orchestration-design.md#4-공유-도구-tools)).
+
+### 7.2 처리 플로우 (정적 순차)
 
 ```python
-class NewsAgentState(TypedDict):
+class NewsCollectorState(TypedDict):
     schedule: str
-    keywords: list[str]
-    collected: list[dict]
-    clusters: list[dict]
-    scored: list[dict]
-    top_issues: list[dict]
+    collected: list[dict]   # rss 수집 결과
+    saved: int              # upsert_news 저장 건수
     errors: list[str]
 
-workflow = StateGraph(NewsAgentState)
-workflow.add_node("collect",  collect_node)
-workflow.add_node("cluster",  cluster_node)
-workflow.add_node("score",    score_node)
-workflow.add_node("finalize", finalize_node)
-
-workflow.set_entry_point("collect")
-workflow.add_edge("collect",  "cluster")
-workflow.add_edge("cluster",  "score")
-workflow.add_edge("score",    "finalize")
-workflow.add_edge("finalize", END)
+# collect → preprocess → save 정적 순차 (분기·반복 없음 → Airflow Task)
+async def run(self, schedule: str) -> NewsCollectorState:
+    collected      = await rss_collector.collect()   # 16개 고정 RSS 폴링·KST 정규화
+    records, _stat = run_preprocessing(              # HTML·URL·필터·제목중복 (인메모리, →04)
+        [c.to_record() for c in collected]
+    )
+    saved = await upsert_news(db, records)           # 정제본 1회 저장 (ON CONFLICT url)
+    return {"schedule": schedule, "collected": records,
+            "saved": saved, "errors": []}
 ```
+
+저장된 정제 뉴스(`is_filtered`로 분석 제외 표시)는 EmbeddingClusterer가 `is_filtered = FALSE AND embedding IS NULL`로 이어받는다(→ [01 §2](./01-pipeline-orchestration-design.md#2-전체-구조--데이터-핸드오프)). 전처리는 별도 단계가 아니라 수집 노드 안에서 인메모리로 처리된다(→ [04 §1.2](./04-preprocessing-design.md#12-전처리의-위치--수집전처리저장을-한-흐름으로)).
 
 
 ## 8. 데이터 명세
@@ -366,29 +303,35 @@ workflow.add_edge("finalize", END)
 
 ### 8.1 수집·저장 필드 정의
 
-| 필드명 | 타입 | 출처 | 설명 |
-|--------|------|------|------|
-| `title` | String(500) | 모든 소스 | 뉴스 제목 |
-| `url` | String(500) | 모든 소스 | 원문 URL. **unique 제약으로 중복 방지** |
-| `source` | String(100) | — | 소스 식별자 (예: `"hankyung"`, `"edaily"`, `"investing_stock"`) |
-| `source_type` | String(50) | — | 뉴스 유형 (`"market_news"` / `"stock_news"`) |
-| `region` | String(10) | — | 지역 (`"domestic"` / `"global"`) |
-| `symbol` | String(20) | — | 종목 코드. 종목 뉴스만 값 있음 |
-| `preprocessed_at` | DateTime(tz) | — | NULL=미처리. PreprocessingAgent 완료 시각 기록 |
-| `is_analyzed` | Boolean | — | 분석 파이프라인 처리 여부. 기본값 `False` |
-| `published_at` | DateTime | 모든 소스 | 기사 발행 시각 |
-| `score` | Float | 임베딩 단계 | 볼륨·속도 스코어 (클러스터 대표 기사 선정에 사용) |
-| `embedding` | Vector(768) | 임베딩 단계 | title 임베딩. pgvector 저장 |
+`news` 테이블 필드를 **채워지는 시점**으로 구분한다. 고정 RSS는 라벨이 없으므로 수집 시점 필드는 최소이고, 나머지는 각 파이프라인 단계가 채운다.
 
-**저장하지 않는 것**: snippet, 본문, 이미지, 기자명  
-→ snippet·본문은 저작권 리스크. 본문은 분석 시점에 대표 기사만 실시간 fetch 후 폐기.
+| 필드명 | 타입 | 채우는 시점 | 설명 |
+|--------|------|------------|------|
+| `title` | String(500) | **수집→전처리** | RSS 제목 (전처리에서 HTML 정제) |
+| `url` | String(500), unique | **수집→전처리** | 원문 URL — 전처리에서 트래킹 파라미터 제거 후 저장 (중복 방지 키) |
+| `source` | String(100) | **수집** | 피드 식별자 (예: `"hankyung"`, `"edaily"`, `"investing_stock"`) |
+| `published_at` | DateTime, nullable | **수집** (KST 정규화) | 기사 발행 시각 (피드에 없으면 NULL) |
+| `created_at` | DateTime | **저장** | DB 적재 시각 (server_default) |
+| `is_filtered` | Boolean (기본 `False`) | **전처리** | 24h 초과·제목 중복으로 분석 제외 시 `True` |
+| `embedding` | Vector(768), nullable | **임베딩** | title 임베딩 (pgvector) |
+| `is_analyzed` | Boolean (기본 `False`) | **분석** | 분석 파이프라인 처리 여부 |
+
+> `preprocessed_at` 컬럼은 인메모리 전처리 전환으로 **미사용**이며 모델에는 남아 있으나 마이그레이션으로 제거 예정이다(→ [04 §7](./04-preprocessing-design.md#7-db-변경-사항)). 위 표의 전체 스키마 정본은 ORM 모델 [`app/db/orm_models/news.py`](../../app/db/orm_models/news.py)이다(`rss_source`·`news_source`·`stock_code`·`score` 포함).
+
+> **별도 테이블로 분리한 필드**:
+> - **클러스터·스코어** — 클러스터는 기사당이 아니라 **기사 그룹당** 개념이고, 복합 중요도 스코어도 **클러스터당** 값이다. `news` 행에 두면 grain이 맞지 않으므로 [`news_cluster` 테이블](#83-news_cluster-테이블-클러스터링-산출물)로 분리한다. (구 `score`/`region` 컬럼 제거)
+> - **유형·종목** — `source_type`(시장/종목)·`symbol`(종목 코드)은 고정 RSS에 라벨이 없어 수집 시점에 정할 수 없다. 분석 단계 산출물이며 [06](./06-news-analysis-design.md)의 `news_analysis`에서 관리한다.
+>
+> `region`(domestic/global)은 `source`(피드 식별자)로 항상 도출되므로 별도 컬럼을 두지 않는다.
+
+**저장하지 않는 것**: snippet, 본문, 이미지, 기자명 — 저작권 리스크. 본문은 분석 시점에 대표 기사만 실시간 fetch 후 폐기(→ [8.4](#84-본문-fetch-전략)).
 
 ### 8.2 DB 스키마 (SQLAlchemy)
 
 ```python
 from datetime import datetime, timezone
 from sqlalchemy import (
-    Column, Integer, String, Text, Boolean, DateTime, UniqueConstraint
+    Column, Integer, String, Boolean, DateTime, UniqueConstraint
 )
 from pgvector.sqlalchemy import Vector
 from app.db.database import Base
@@ -400,16 +343,15 @@ class News(Base):
     id               = Column(Integer, primary_key=True)
     title            = Column(String(500), nullable=False)
     url              = Column(String(500), nullable=False)
-    source           = Column(String(100), nullable=False)
-    source_type      = Column(String(50), nullable=False)
-    region           = Column(String(10), nullable=False)
-    symbol           = Column(String(20), nullable=True)
-    preprocessed_at  = Column(DateTime(timezone=True), nullable=True)   # NULL=미처리
+    source           = Column(String(100), nullable=False)   # 피드 식별자 (region 도출 가능)
+    is_filtered      = Column(Boolean, default=False)         # 전처리에서 분석 제외 표시
+    # preprocessed_at: 인메모리 전처리 전환으로 미사용 — 마이그레이션으로 제거 예정 (→ 04 §7)
+    embedding        = Column(Vector(768), nullable=True)                # title 임베딩
     is_analyzed      = Column(Boolean, default=False)
     published_at     = Column(DateTime(timezone=True), nullable=False)
     created_at       = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
-    score            = Column(Float, nullable=True)                      # 볼륨·속도 스코어
-    embedding        = Column(Vector(768), nullable=True)                # title 임베딩
+    # 클러스터·복합 중요도 스코어는 grain이 달라 news_cluster로 분리 (→ 8.3)
+    # source_type(시장/종목)·symbol(종목코드)은 분석 산출물(→ 06 news_analysis)
     # snippet, body 저장 안 함 — 저작권 리스크. 본문은 분석 시점에 실시간 fetch 후 폐기
 
     __table_args__ = (UniqueConstraint("url"),)
@@ -432,14 +374,36 @@ CREATE INDEX idx_news_embedding ON news USING hnsw (embedding vector_cosine_ops)
 
 > HNSW 인덱스는 pgvector 활성화 직후 생성한다. 벡터가 수십만 건 쌓인 뒤 추가하면 인덱스 빌드 시간이 오래 걸린다.
 
-### 8.3 본문 fetch 전략
+### 8.3 `news_cluster` 테이블 (클러스터링 산출물)
+
+클러스터링·스코어링은 [05 EmbeddingClusterer](./05-embedding-clustering-design.md#8-embeddingclusterer-설계)가 수행하며, 그 결과를 `news_cluster`에 적재한다. `news`(기사당)와 grain이 다른 **클러스터당 1행**이다. `embedding`은 `news`에 남고, 클러스터 식별·소속·스코어만 분리한다.
+
+```python
+from sqlalchemy import ARRAY, Date, Float, ForeignKey
+
+class NewsCluster(Base):
+    __tablename__ = "news_cluster"
+
+    id                     = Column(Integer, primary_key=True)
+    run_date               = Column(Date, nullable=False)             # 클러스터링 실행 일자
+    representative_news_id  = Column(Integer, ForeignKey("news.id"), nullable=False)  # 대표 기사 = member_news_ids[0]
+    member_news_ids        = Column(ARRAY(Integer), nullable=False)   # 소속 기사 id (중심 근접순 정렬 — fetch fallback 순서, → 05 §5.8)
+    size                   = Column(Integer, nullable=False)          # 클러스터 기사 수
+    importance             = Column(Float, nullable=False)            # 복합 중요도 스코어 [0,1]
+    created_at             = Column(DateTime(timezone=True),
+                                    default=lambda: datetime.now(timezone.utc))
+```
+
+> 스키마·스코어 산식의 단일 출처는 [05 §6](./05-embedding-clustering-design.md#6-주요-이슈-선정--복합-중요도-스코어)이다. 분석 단계는 `news_cluster`를 `importance` 내림차순으로 읽어 상위 이슈를 인계받는다(→ [06](./06-news-analysis-design.md)).
+
+### 8.4 본문 fetch 전략
 
 snippet은 저장하지 않는다. 분석 시점에 클러스터 대표 기사 URL로 **trafilatura**를 통해 본문을 실시간 fetch하고 사용 후 폐기한다.
 
 | 상황 | 대응 |
 |------|------|
-| 정상 fetch | 본문을 LLM 입력으로 사용 후 폐기 |
-| 페이월 | 관련 기사 목록에서 대체 기사 순차 시도 |
+| 정상 fetch | 대표기사(`member_news_ids[0]`) 본문을 LLM 입력으로 사용 후 폐기 |
+| 페이월 | `member_news_ids` 중심 근접순(→ 05 §5.8)으로 다음 후보 순차 시도 |
 | 전부 실패 | title만으로 분석 (품질 저하 허용)
 
 ---
@@ -453,7 +417,7 @@ snippet은 저장하지 않는다. 분석 시점에 클러스터 대표 기사 U
 | **09:00** | 전일 야간 뉴스 + 당일 프리마켓 뉴스 | 장 시작 전 이슈 파악 |
 | **15:30** | 당일 장 중 뉴스 전체 + 분석 파이프라인 트리거 | 장 마감(15:20) 직후 당일 전체 분석 |
 
-스케줄링은 **Airflow DAG**가 담당한다. 상세 DAG 정의는 [`01-agent-orchestration-design.md`](./01-agent-orchestration-design.md) 섹션 3.3 참조.
+스케줄링은 **Airflow DAG**가 담당한다. 상세 DAG 정의는 [`01-pipeline-orchestration-design.md`](./01-pipeline-orchestration-design.md) 섹션 3.3 참조.
 
 ```python
 # dags/jangdokdae_morning.py — Airflow cron 예시
@@ -465,99 +429,44 @@ schedule_interval="30 15 * * 1-5"  # 평일 15:30 KST
 
 ## 10. 시스템 아키텍처
 
-### 10.1 전체 멀티 에이전트 구조
+### 10.1 전체 파이프라인 구조
 
-수집·전처리·임베딩을 각각 독립된 에이전트로 분리하고, `MasterOrchestrator`가 전체를 조율한다.
+수집·전처리·임베딩을 각각 독립된 단계(컴포넌트)로 분리하고, **Airflow DAG**가 전체를 조율한다(스케줄·의존성·재시도). 전체 데이터 흐름·단계 인덱스·디렉토리 구조는 [01 통합 개요](./01-pipeline-orchestration-design.md), DAG·스케줄은 [00](./00-workflow-airflow.md)을 단일 출처로 한다.
 
-```
-dags/                              ← Airflow DAG (스케줄링 담당)
-  ├── jangdokdae_morning.py      ← 09:00 평일
-  ├── jangdokdae_afternoon.py    ← 15:30 평일
-  └── jangdokdae_market_close.py ← 16:30 평일
-
-services/
-  ├── master_orchestrator.py              ← MasterOrchestrator  ⭐ 전체 조율
-  │
-  ├── agents/
-  │   ├── news_collection_agent.py        ← NewsCollectionAgent (LangGraph)
-  │   ├── company_collection_agent.py     ← CompanyCollectionAgent (LangGraph)
-  │   ├── preprocessing_agent.py        ← PreprocessingAgent
-  │   └── embedding_clustering_agent.py   ← EmbeddingClusteringAgent
-  │
-  ├── collector/               ← 수집기 (에이전트 도구로 사용)
-  │   ├── tools/
-  │   │   ├── search_tool.py   ← Google RSS (topic + search) / Finnhub 검색
-  │   │   ├── dart_tool.py     ← DART 공시 수집
-  │   │   ├── stock_tool.py    ← 주가 수집 (FinanceDataReader)
-  │   │   ├── macro_tool.py    ← 환율·금리 수집
-  │   │   ├── cluster_tool.py  ← 클러스터링 + 볼륨 스코어
-  │   │   └── save_tool.py     ← DB UPSERT
-  │   └── rss_collector.py          ← 국내 증권 RSS + investing.com 통합
-  │
-  ├── preprocessor/            ← 전처리기 (PreprocessingAgent 도구)
-  │   ├── deduplicator.py
-  │   ├── filter.py
-  │   └── normalizer.py
-  │
-  └── embedder/                ← 임베더 (EmbeddingClusteringAgent 도구로 사용)
-      ├── news_embedder.py
-      └── cluster.py
-```
+뉴스 수집 단계가 닿는 파일:
+- `services/pipeline/news_collector.py` — 단계 진입점 (`collect→save`)
+- `services/collector/rss_collector.py` + `tools/`(rss·save) — 수집·도구
+- `services/preprocessor/`, `services/embedder/` — 후속 단계가 소비 (클러스터링·스코어링 포함)
 
 ---
 
-### 10.2 MasterOrchestrator 역할
+### 10.2 오케스트레이션 (Airflow DAG)
 
-에이전트들의 **실행 순서·타이밍·의존성**을 관리한다.  
-에이전트끼리 직접 통신하지 않는다. **공유 DB를 통해 데이터를 전달**한다.
+단계들의 **실행 순서·타이밍·의존성·재시도**는 Airflow DAG가 관리한다(별도 MasterOrchestrator 객체 없음). 각 Task가 해당 단계를 직접 호출하며, 단계끼리 직접 통신하지 않는다 — **공유 DB를 통해 데이터를 전달**한다. 상세는 [00-workflow-airflow.md](./00-workflow-airflow.md) 참조.
 
-```python
-class MasterOrchestrator:
-    async def run_morning(self) -> None:
-        """09:00 — 장 시작 전"""
-        await asyncio.gather(
-            self.news_agent.run("morning"),
-            self.company_agent.run("morning"),
-        )
-        # 전처리는 수집 인라인 실행 (04-preprocessing-design.md 참조)
-        await self.embedding_agent.run()
-
-    async def run_afternoon(self) -> None:
-        """15:30 — 장 마감 직후"""
-        await asyncio.gather(
-            self.news_agent.run("afternoon"),
-            self.company_agent.run("afternoon"),
-        )
-        # 전처리는 수집 인라인 실행 (04-preprocessing-design.md 참조)
-        await self.embedding_agent.run()
-        await self._trigger_analysis_pipeline()
-
-    async def run_market_close(self) -> None:
-        """16:30 — 주가·거시지표 수집 (전처리·임베딩 불필요)"""
-        await self.company_agent.run("market_close")
-```
-
-**에이전트 간 의존성:**
+**단계 간 의존성:**
 
 ```
-NewsCollectionAgent   ─┐
-                        ├→ DB 저장 (원시, preprocessed_at=NULL) → PreprocessingAgent → EmbeddingClusteringAgent
-CompanyCollectionAgent ─┘                                        ↓
-                                                       분석 파이프라인 트리거
+NewsCollector(수집→전처리) ─┐
+                            ├→ DB 저장 (정제본, is_filtered) → EmbeddingClusterer
+CompanyCollector           ─┘                                  ↓
+                                                          analyze (L2 → 06 §18)
 ```
+
+> Airflow 없이 전체를 로컬에서 한 번에 돌리려면 `services/pipeline/runner.py`의 `run_pipeline()`을 쓴다(하이브리드).
 
 ---
 
-### 10.3 에이전트 상세 설계 참조
+### 10.3 단계 상세 설계 참조
 
-각 에이전트의 상태, 노드, 플로우, 에러 처리는 별도 문서를 참조한다.
+각 단계의 상태, 노드, 플로우, 에러 처리는 별도 문서를 참조한다.
 
-→ [`01-agent-orchestration-design.md`](./01-agent-orchestration-design.md)
+→ [`01-pipeline-orchestration-design.md`](./01-pipeline-orchestration-design.md)
 
 
 ## 11. 구현 로드맵
 
-에이전트별로 독립 구현 후 `MasterOrchestrator`로 통합한다.
+단계별로 독립 구현 후 **Airflow DAG**로 통합한다.
 
 ### Phase 1 — 수집기 도구 구현
 
@@ -565,33 +474,31 @@ CompanyCollectionAgent ─┘                                        ↓
 |------|------|--------|
 | 1 | `RssCollector` 구현 (국내 증권 13개 + investing.com 3개) | `services/collector/rss_collector.py` |
 | 2 | `normalizer.py` 구현 | `services/preprocessor/normalizer.py` |
-| 3 | `search_tool`, `save_tool` 구현 | `services/collector/tools/` |
+| 3 | `rss_tool`, `save_tool` 구현 | `services/collector/tools/` |
 | 4 | DB 스키마 반영 (`News`) | `app/db/models.py` |
 
-### Phase 2 — NewsCollectionAgent 구현
+### Phase 2 — NewsCollector(수집 전용) 구현
 
 | 단계 | 내용 | 산출물 |
 |------|------|--------|
-| 8 | pgvector 활성화 | DB 마이그레이션 |
-| 9 | `news_embedder.py`, `cluster.py` 구현 | `services/embedder/` |
-| 10 | `cluster_tool`, `score_tool` 구현 | `services/collector/tools/` |
-| 11 | `NewsCollectionAgent` LangGraph 노드 구현 | `services/agents/news_collection_agent.py` |
+| 5 | DB 스키마 마이그레이션 (`News`, `news_cluster`) + pgvector 활성화 | Alembic / DB |
+| 6 | `NewsCollector` 정적 순차(collect→save) 구현 | `services/pipeline/news_collector.py` |
 
-### Phase 3 — 전처리 모듈 + EmbeddingClusteringAgent 구현
+> 클러스터링·스코어링(`cluster.py`·`news_embedder.py`·`news_cluster` 적재)은 수집 단계가 아니라 **임베딩·클러스터링 단계**가 담당한다 → [05 구현 로드맵](./05-embedding-clustering-design.md#10-구현-로드맵).
 
-| 단계 | 내용 | 산출물 |
-|------|------|--------|
-| 13 | `deduplicator.py`, `filter.py` 구현 | `services/preprocessor/` |
-| 14 | `PreprocessingAgent` 구현 | `services/agents/preprocessing_agent.py` |
-| 15 | `EmbeddingClusteringAgent` 구현 | `services/agents/embedding_clustering_agent.py` |
-
-### Phase 4 — MasterOrchestrator 통합
+### Phase 3 — 전처리 모듈
 
 | 단계 | 내용 | 산출물 |
 |------|------|--------|
-| 16 | `MasterOrchestrator` 구현 | `services/master_orchestrator.py` |
-| 17 | Airflow DAG 작성 (09:00 / 15:30 / 16:30) | `dags/` |
-| 18 | 키워드 통과율 집계 | `app/db/queries.py` |
+| 7 | `deduplicator.py`, `filter.py` 구현 | `services/preprocessor/` |
+| 8 | `Preprocessor` 구현 | `services/pipeline/preprocessor.py` |
+
+### Phase 4 — Airflow 통합
+
+| 단계 | 내용 | 산출물 |
+|------|------|--------|
+| 9 | `run_pipeline()` 러너 구현 (하이브리드 로컬 실행) | `services/pipeline/runner.py` |
+| 10 | Airflow DAG 작성 (메인 09:00·15:30 + 보조) | `dags/jangdokdae_pipeline.py` 등 |
 
 ### Phase 5 — 본문 fetch 품질 검증
 
@@ -605,7 +512,7 @@ CompanyCollectionAgent ─┘                                        ↓
 
 | 항목 | 내용 | 결정 시점 |
 |------|------|----------|
-| 임베딩 모델 선정 | `text-multilingual-embedding-002` 1순위 후보, 확정 필요 | Phase 2 시작 전 |
+| 임베딩 모델 선정 | **미확정** — 후보(`gemini-embedding-001` / `nlpai-lab/KURE-v1` / `ko-sroberta` baseline) 비교 테스트 후 결정. 정본은 [05 §2.1·§11](./05-embedding-clustering-design.md#21-임베딩-모델-비교) | Phase 2 시작 전 |
 | 클러스터링 임계값 | 실제 뉴스 100건으로 교정 테스트 후 결정 | Phase 2 구현 후 |
 | 본문 fetch 품질 | trafilatura 성공률 및 페이월 비율 검증 | Phase 1 구현 후 테스트 |
 | 관심 종목 없는 초기 사용자 대응 | 기본 피드 뉴스만 제공할지 여부 | 기획 논의 필요 |
