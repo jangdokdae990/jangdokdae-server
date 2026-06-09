@@ -9,6 +9,7 @@
 > - [파이프라인 오케스트레이션](./01-pipeline-orchestration-design.md)
 > - [전처리 기획서](./04-preprocessing-design.md)
 > - [기업 데이터 수집 기획서](./03-company-data-collection-design.md)
+> - [임베딩 모델 비교 결과 (1차)](../evaluation/00-embedding-model-comparison-result.md) — §11 모델 확정용 비교
 
 ---
 
