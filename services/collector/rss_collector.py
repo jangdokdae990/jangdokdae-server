@@ -28,13 +28,10 @@ from dateutil import parser as date_parser
 
 from services.collector.rss_feeds import ALL_FEEDS, FeedSource
 from utils.dates import to_naive_kst
+from utils.http import USER_AGENT
 
 logger = logging.getLogger(__name__)
 
-USER_AGENT = (
-    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
-    "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
-)
 DEFAULT_MAX_CONCURRENCY = 8
 DEFAULT_TIMEOUT = 10.0
 
@@ -69,7 +66,13 @@ class RSSCollector:
         self.max_concurrency = max_concurrency
         self.timeout = timeout
 
-    async def collect(self) -> list[CollectedNews]:
+    async def collect(self) -> tuple[list[CollectedNews], list[str]]:
+        """수집 기사와 실패 피드 식별자를 함께 반환한다.
+
+        실패 피드를 반환값으로 끌어올려 단계 경계(NewsCollector)에서 부분 실패를
+        구조적으로 인지하게 한다 — 16개 중 다수가 조용히 죽어도 Task는 성공으로 끝나기에,
+        로그에만 두면 수집량 급감을 놓친다(설계 02 §7.2).
+        """
         semaphore = asyncio.Semaphore(self.max_concurrency)
         headers = {"User-Agent": USER_AGENT}
 
@@ -85,31 +88,26 @@ class RSSCollector:
             )
 
         collected: list[CollectedNews] = []
+        failed_feeds: list[str] = []
         for feed, batch in zip(self.feeds, batches):
             if isinstance(batch, BaseException):
-                # 예기치 못한 예외도 피드 단위로 격리 — 전체 수집을 멈추지 않는다
-                logger.error(
-                    "RSS 피드 수집 중 예외 rss_source=%s err=%s", feed.rss_source, batch
+                # 피드 단위 격리 — 한 피드 실패가 전체 수집을 멈추지 않는다.
+                # _fetch_feed가 예외를 전파하므로 HTTP 실패·예기치 못한 예외가 모두 여기로 모인다.
+                logger.warning(
+                    "RSS 피드 수집 실패 rss_source=%s err=%s", feed.rss_source, batch
                 )
+                failed_feeds.append(feed.rss_source)
                 continue
             collected.extend(batch)
-        return collected
+        return collected, failed_feeds
 
     async def _fetch_feed(
         self, client: httpx.AsyncClient, feed: FeedSource
     ) -> list[CollectedNews]:
-        try:
-            response = await client.get(feed.url)
-            response.raise_for_status()
-        except httpx.HTTPError as exc:
-            # 피드 단위 격리 — 한 피드 실패가 전체 수집을 멈추지 않도록 한다
-            logger.warning(
-                "RSS 피드 수집 실패 rss_source=%s url=%s err=%s",
-                feed.rss_source,
-                feed.url,
-                exc,
-            )
-            return []
+        # HTTP 실패는 잡지 않고 전파한다 — collect()의 gather가 피드 단위로 격리·분류해
+        # failed_feeds에 모은다(실패와 '빈 피드'를 구분하기 위함).
+        response = await client.get(feed.url)
+        response.raise_for_status()
 
         parsed = feedparser.parse(response.text)
         if parsed.bozo:
