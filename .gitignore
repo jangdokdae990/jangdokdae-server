@@ -69,4 +69,6 @@ tmp/
 temp/
 *.bak
 tests/
-scripts/
+
+# 임베딩 모델 비교 라벨셋 — 실데이터(수집 뉴스 제목)는 커밋 금지, example만 추적
+scripts/data/embedding_labelset.json
