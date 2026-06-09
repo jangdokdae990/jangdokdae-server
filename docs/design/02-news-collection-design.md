@@ -280,20 +280,23 @@ async def run_collection() -> list[dict]:
 ```python
 class NewsCollectorState(TypedDict):
     schedule: str
-    collected: list[dict]   # rss 수집 결과
-    saved: int              # upsert_news 저장 건수
-    errors: list[str]
+    collected: int           # 수집한 원시 기사 수
+    kept: int                # 전처리 통과(분석 대상) 수 — is_filtered=False
+    saved: int               # upsert_news가 새로 삽입한 수
+    failed_feeds: list[str]  # 수집 실패한 피드 식별자 (빈 리스트=전부 성공)
 
 # collect → preprocess → save 정적 순차 (분기·반복 없음 → Airflow Task)
-async def run(self, schedule: str) -> NewsCollectorState:
-    collected      = await rss_collector.collect()   # 16개 고정 RSS 폴링·KST 정규화
-    records, _stat = run_preprocessing(              # HTML·URL·필터·제목중복 (인메모리, →04)
+async def run(self, db, schedule: str) -> NewsCollectorState:
+    collected, failed_feeds = await rss_collector.collect()  # 16개 고정 RSS 폴링·KST 정규화
+    records, stats = run_preprocessing(              # HTML·URL·필터·제목중복 (인메모리, →04)
         [c.to_record() for c in collected]
     )
     saved = await upsert_news(db, records)           # 정제본 1회 저장 (ON CONFLICT url)
-    return {"schedule": schedule, "collected": records,
-            "saved": saved, "errors": []}
+    return {"schedule": schedule, "collected": len(collected), "kept": stats.kept,
+            "saved": saved, "failed_feeds": failed_feeds}
 ```
+
+> **State는 데이터가 아니라 보고다.** 반환값은 Airflow Task 결과(XCom)이므로 수집 레코드 전체가 아니라 **카운트와 실패 신호**만 담는다. 실제 데이터 핸드오프는 공유 DB의 상태 컬럼(`is_filtered`/`embedding`)으로 이뤄지므로(→ [01 §2](./01-pipeline-orchestration-design.md#2-전체-구조--데이터-핸드오프)), 레코드를 XCom에 실으면 비대해지고 DB 핸드오프 원칙과 어긋난다. `failed_feeds`는 16개 중 일부가 조용히 실패해도 Task가 성공으로 끝나는 부분 실패를 단계 경계로 끌어올려, 수집량 급감을 로그가 아닌 구조적 신호로 인지하게 한다.
 
 저장된 정제 뉴스(`is_filtered`로 분석 제외 표시)는 EmbeddingClusterer가 `is_filtered = FALSE AND embedding IS NULL`로 이어받는다(→ [01 §2](./01-pipeline-orchestration-design.md#2-전체-구조--데이터-핸드오프)). 전처리는 별도 단계가 아니라 수집 노드 안에서 인메모리로 처리된다(→ [04 §1.2](./04-preprocessing-design.md#12-전처리의-위치--수집전처리저장을-한-흐름으로)).
 
