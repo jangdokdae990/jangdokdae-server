@@ -15,7 +15,7 @@ class FinancialStatement(Base):
     corp_code: Mapped[str] = mapped_column(String(20), nullable=False)  # DART 기업 고유번호
     corp_name: Mapped[str] = mapped_column(String(200), nullable=False)
     # 원천 공시 접수번호 — disclosures·report_chunks와 같은 사업보고서를 잇는 추적 키
-    rcept_no: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    rcept_no: Mapped[str | None] = mapped_column(String(20), nullable=True, index=True)
     year: Mapped[int] = mapped_column(Integer, nullable=False)
     quarter: Mapped[int] = mapped_column(Integer, nullable=False)  # 1~4 (사업보고서=4)
     revenue: Mapped[int | None] = mapped_column(BigInteger, nullable=True)           # 매출액

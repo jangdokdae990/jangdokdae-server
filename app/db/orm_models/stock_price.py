@@ -28,7 +28,7 @@ class StockPrice(Base):
     close: Mapped[float] = mapped_column(Float, nullable=False)
     volume: Mapped[int] = mapped_column(BigInteger, nullable=False)
     market_cap: Mapped[int | None] = mapped_column(BigInteger, nullable=True)  # pykrx 보완(후속)
-    date: Mapped[date] = mapped_column(Date, nullable=False)             # 거래일
+    date: Mapped[date] = mapped_column(Date, nullable=False, index=True)  # 거래일
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=False), server_default=KST_NOW, nullable=False
     )

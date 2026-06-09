@@ -22,7 +22,7 @@ class CompanyEntity(Base):
     corp_code: Mapped[str | None] = mapped_column(String(20), nullable=True)  # DART 고유코드
     market: Mapped[str] = mapped_column(String(10), nullable=False)  # "KOSPI" | "KOSDAQ"
     sector_id: Mapped[int | None] = mapped_column(
-        Integer, ForeignKey("sectors.id"), nullable=True
+        Integer, ForeignKey("sectors.id"), nullable=True, index=True
     )
     is_active: Mapped[bool] = mapped_column(
         Boolean, server_default=text("true"), nullable=False

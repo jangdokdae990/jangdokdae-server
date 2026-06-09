@@ -16,7 +16,7 @@ class MarketIndicator(Base):
     indicator_type: Mapped[str] = mapped_column(String(50), nullable=False)
     currency: Mapped[str | None] = mapped_column(String(10), nullable=True)  # 환율만: "USD"·"JPY"
     value: Mapped[float] = mapped_column(Float, nullable=False)
-    date: Mapped[date] = mapped_column(Date, nullable=False)
+    date: Mapped[date] = mapped_column(Date, nullable=False, index=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=False), server_default=KST_NOW, nullable=False
     )
