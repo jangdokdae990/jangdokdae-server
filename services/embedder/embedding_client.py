@@ -55,18 +55,19 @@ class EmbeddingClient:
         if is_vertex_model(self.model_name):
             from langchain_google_vertexai import VertexAIEmbeddings
 
-            if not settings.vertex_ai_project_id:
+            if not settings.google_cloud_project:
                 # 조용히 HF로 떨어지면 "왜 다른 모델이 돌지?"를 디버깅하게 되므로 명시적으로 막는다.
                 raise ValueError(
-                    f"Vertex 임베딩 모델({self.model_name})인데 VERTEX_AI_PROJECT_ID가 비어 있다 "
-                    "— .env에 VERTEX_AI_PROJECT_ID/LOCATION 설정 필요"
+                    f"Vertex 임베딩 모델({self.model_name})인데 GOOGLE_CLOUD_PROJECT가 비어 있다 "
+                    "— .env에 GOOGLE_CLOUD_PROJECT + GOOGLE_APPLICATION_CREDENTIALS 설정 필요"
                 )
             logger.info("임베딩 백엔드=Vertex model=%s dim=%d", self.model_name, self.dim)
+            # 인증은 ADC(GOOGLE_APPLICATION_CREDENTIALS, config가 os.environ으로 bridge)로 처리된다.
             # model_name은 pydantic 필드지만 mypy가 생성자 시그니처에서 못 읽는다(런타임 정상).
             return VertexAIEmbeddings(  # type: ignore[call-arg]
                 model_name=self.model_name,
-                project=settings.vertex_ai_project_id,
-                location=settings.vertex_ai_location,
+                project=settings.google_cloud_project,
+                location=settings.google_cloud_location,
                 dimensions=self.dim,  # MRL 무손실 절단 (gemini 3072→768, 현재 스키마 유지)
             )
 

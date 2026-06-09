@@ -1,5 +1,7 @@
 """환경 변수 기반 애플리케이션 설정."""
 
+import os
+from pathlib import Path
 from urllib.parse import urlsplit, urlunsplit
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -19,11 +21,13 @@ class Settings(BaseSettings):
     embed_model: str = "jhgan/ko-sroberta-multitask"  # baseline (.env: EMBED_MODEL)
     embed_dim: int = 768  # 임베딩 차원 (.env: EMBED_DIM) — 모델에 따라 768 또는 1024
     embed_batch_size: int = 50  # Vertex AI 최대 허용 배치 크기 (설계 05 §2.3)
-    # Vertex AI — gemini 계열 임베딩(관리형) 분기에서 사용. 프로젝트/리전이 없으면 Vertex 호출 불가.
-    # HuggingFace 분기(KURE·ko-sroberta)는 이 값들이 비어 있어도 동작한다.
-    vertex_ai_project_id: str = ""  # (.env: VERTEX_AI_PROJECT_ID)
-    vertex_ai_location: str = "asia-northeast1"  # (.env: VERTEX_AI_LOCATION)
-    vertex_ai_model: str = "gemini-1.5-flash"  # LLM 분석용 (.env: VERTEX_AI_MODEL)
+    # Google Cloud / Vertex AI — gemini 계열 임베딩(관리형) 분기 + LLM 분석에서 사용.
+    # 프로젝트가 없으면 Vertex 호출 불가. HuggingFace 분기(KURE·ko-sroberta)는 비어 있어도 동작한다.
+    # 서비스 계정 키 경로 (.env: GOOGLE_APPLICATION_CREDENTIALS)
+    google_application_credentials: str = ""
+    google_cloud_project: str = ""  # (.env: GOOGLE_CLOUD_PROJECT)
+    google_cloud_location: str = "asia-northeast3"  # (.env: GOOGLE_CLOUD_LOCATION)
+    vertex_model: str = "gemini-2.5-flash"  # LLM 분석용 (.env: VERTEX_MODEL)
 
     @property
     def async_url(self) -> str:
@@ -41,3 +45,24 @@ class Settings(BaseSettings):
 
 
 settings = Settings()  # type: ignore[call-arg]  # database_url은 .env에서 로드
+
+
+def _export_google_adc() -> None:
+    """표준 Google 환경변수를 os.environ으로 내보낸다.
+
+    pydantic-settings는 .env를 settings 객체로만 읽고 os.environ엔 넣지 않는다. 반면
+    google-auth(ADC)·Vertex SDK는 os.environ의 GOOGLE_APPLICATION_CREDENTIALS 등을 직접
+    읽으므로, 여기서 한 번 bridge 해줘야 gemini 임베딩·LLM이 서비스 계정으로 인증된다.
+    이미 셸에 설정돼 있으면(setdefault) 덮어쓰지 않는다.
+    """
+    if settings.google_application_credentials:
+        # 상대 경로(.env: credentials/vertex_key.json)를 절대 경로로 — 실행 위치 무관하게 안정.
+        key_path = Path(settings.google_application_credentials).resolve()
+        os.environ.setdefault("GOOGLE_APPLICATION_CREDENTIALS", str(key_path))
+    if settings.google_cloud_project:
+        os.environ.setdefault("GOOGLE_CLOUD_PROJECT", settings.google_cloud_project)
+    if settings.google_cloud_location:
+        os.environ.setdefault("GOOGLE_CLOUD_LOCATION", settings.google_cloud_location)
+
+
+_export_google_adc()
