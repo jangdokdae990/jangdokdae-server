@@ -28,6 +28,11 @@ dependencies = [
     "python-dateutil==2.9.0.post0",
     "finance-datareader==0.9.202",
     "pykrx>=1.2.8",
+    "trafilatura>=2.1.0",
+    "hdbscan>=0.8.44",
+    "scikit-learn>=1.9.0",
+    "langchain-huggingface>=1.2.2",
+    "sentence-transformers>=5.5.1",
 ]
 
 [project.optional-dependencies]
@@ -54,7 +59,7 @@ target-version = ['py312']
 [tool.ruff]
 line-length = 100
 target-version = "py312"
-extend-exclude = ["alembic"]  # 자동 생성 마이그레이션·env.py는 린트 제외
+extend-exclude = ["migrations"]  # 자동 생성 마이그레이션·env.py는 린트 제외
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I"]
@@ -76,5 +81,5 @@ namespace_packages = true
 explicit_package_bases = true
 
 [[tool.mypy.overrides]]
-module = ["feedparser", "pgvector.*", "dateutil.*", "FinanceDataReader", "pykrx.*"]
+module = ["feedparser", "pgvector.*", "dateutil.*", "FinanceDataReader", "pykrx.*", "hdbscan", "sklearn.*"]
 ignore_missing_imports = true
