@@ -69,7 +69,7 @@ Airflow DAG (각 Task가 단계를 직접 호출 → 00)
 | 단계 | 읽는 조건 | 끝나면 |
 |------|----------|--------|
 | NewsCollector(수집+전처리) / CompanyCollector | — | INSERT 정제본 (`is_filtered`, `embedding=NULL`, `is_analyzed=false`) |
-| EmbeddingClusterer | `is_filtered = FALSE AND embedding IS NULL` | `embedding` 채움 + `news_cluster` 적재(`importance`) |
+| EmbeddingClusterer | `is_filtered = FALSE AND embedding IS NULL` | `embedding` 채움 + 근접중복 `is_duplicate` 표시(soft) + `news_cluster` 적재(`importance`) |
 | NewsAnalysisAgent (L2) | `is_analyzed=false` | Issue Docent 생성, `is_analyzed=true` |
 
 > 이 상태 컬럼들이 단계 간 **계약**이다. 실행 순서(병렬·의존성)와 재시도·재개는 [00 §6~§7](./00-workflow-airflow.md#6-전체-구조)을 참조한다.
@@ -144,13 +144,14 @@ async def upsert_news(db: AsyncSession, records: list[dict]) -> int:
 |------|------|------|
 | `is_filtered` | Boolean | true = 전처리에서 분석 제외(24h·제목 중복) → 임베딩·분석 스킵 |
 | `embedding` | Vector(768)¹, nullable | NULL = 임베딩 대기 (news에 유지) |
+| `is_duplicate` | Boolean | true = 임베딩 유사도(≥0.95) 근접 중복 → 클러스터링·분석 제외 (하드 삭제 아님, → [05 §4.2](./05-embedding-clustering-design.md#42-중복-제거-cosine--095--하드-삭제가-아니라-soft-flag)) |
 | `is_analyzed` | Boolean | false = 분석(L2) 대기 |
 
 > 구 `preprocessed_at`(전처리 핸드오프 키)은 인메모리 전처리 전환으로 제거됐다 — 저장 시점이 곧 전처리 완료이므로 별도 상태 컬럼이 불필요하다(→ [04 §1.2](./04-preprocessing-design.md#12-전처리의-위치--수집전처리저장을-한-흐름으로)). 모델 컬럼은 마이그레이션 보류로 잔존하나 미사용이다.
 
 > 복합 중요도 스코어는 **클러스터당** 값이라 news 상태 컬럼이 아니라 `news_cluster.importance`로 분리한다(grain 불일치 방지 → [02 §8.3](./02-news-collection-design.md#83-news_cluster-테이블-클러스터링-산출물)). `embedding`은 기사당이라 news에 남는다.
 
-> ¹ 차원 기본값 768. **임베딩 모델은 미확정**이며 비교 테스트 후 결정한다(→ [05 §11](./05-embedding-clustering-design.md#11-미결-사항)). 모델 변경 시 차원이 바뀌면(`Vector(1024)` 등) 전 테이블 동시 변경 필요 → `EMBED_DIM` 환경 변수로 관리 권장(코드 네이밍 `EMBED_MODEL`/`EMBED_DIM`과 일치).
+> ¹ 차원 768. **임베딩 모델 확정: `gemini-embedding-001`(768)** — 3축 평가 결과(→ [평가 보고서](../evaluation/00-embedding-model-evaluation.md), [05 §2.1](./05-embedding-clustering-design.md#21-임베딩-모델-비교)). 768이라 현 `Vector(768)` 스키마를 유지한다. `EMBED_MODEL`/`EMBED_DIM` 환경 변수로 관리하며, 향후 1024 모델로 바꾸면 전 테이블 동시 마이그레이션이 필요하다.
 
 ### 마이그레이션 전략
 
