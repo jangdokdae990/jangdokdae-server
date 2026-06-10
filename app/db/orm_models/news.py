@@ -35,6 +35,12 @@ class News(Base):
     is_filtered: Mapped[bool] = mapped_column(
         Boolean, server_default=text("false"), default=False, nullable=False
     )
+    # 임베딩 유사도(cosine ≥ 0.95) 근접 중복 — 삭제 대신 soft flag로 표시(→ 설계 05 §4.2).
+    # 행을 보존해 news_cluster FK 정합성·URL 멱등 재수집 방지·추적성을 지킨다.
+    # 클러스터링·분석은 is_duplicate=false만 읽는다.
+    is_duplicate: Mapped[bool] = mapped_column(
+        Boolean, server_default=text("false"), default=False, nullable=False
+    )
     is_analyzed: Mapped[bool] = mapped_column(
         Boolean, server_default=text("false"), default=False, nullable=False
     )
