@@ -9,6 +9,7 @@
 > - [파이프라인 오케스트레이션](./01-pipeline-orchestration-design.md)
 > - [전처리 기획서](./04-preprocessing-design.md)
 > - [기업 데이터 수집 기획서](./03-company-data-collection-design.md)
+> - [임베딩 모델 평가 종합 보고서](../evaluation/00-embedding-model-evaluation.md) — §11 모델 확정(비지도·라벨·RAG 3축, gemini 확정)
 
 ---
 
@@ -40,7 +41,7 @@
 임베딩 생성 (텍스트 → 벡터)
     │
     ▼
-유사도 기반 중복 제거 (거의 동일한 기사 제거)
+유사도 기반 중복 표시 (거의 동일한 기사를 is_duplicate=TRUE로 — 삭제 아님)
     │
     ▼
 클러스터링 (같은 이슈 묶기)
@@ -74,7 +75,7 @@
 ### 2.1 임베딩 모델 비교
 
 장독대는 한국어 금융 뉴스를 주로 다루므로 모델 선택이 클러스터링·RAG 품질에 직접적인 영향을 미친다.  
-**실제 데이터로 비교 테스트 후 최종 확정한다.** (→ 섹션 11 미결 사항 참조)
+**실데이터 3축 평가(비지도·라벨 클러스터링·RAG 검색)로 `gemini-embedding-001`(768) 확정(2026-06-09).** 아래 후보 비교는 그 선택의 근거이며, 전체 평가 기록·수치는 [임베딩 모델 평가 종합 보고서](../evaluation/00-embedding-model-evaluation.md)를 단일 출처로 한다.
 
 ---
 
@@ -140,11 +141,11 @@
 | 유지보수 | 없음 | 모델 업데이트 관리 필요 |
 | 스키마 영향 | 768 절단 시 변경 없음 | 1024차원 → 스키마 변경 |
 
-> **모델은 아직 미확정**이다. 위 비교는 후보 정리이며, 실제 장독대 데이터로 [§11 비교 하니스](#11-미결-사항)를 돌려 확정한다. 유력 후보는 관리형 `gemini-embedding-001`(768 절단 → 스키마 유지·Vertex 통일)과 오픈소스 `KURE-v1`(한국어 검색 1위, 1024). 모델 변경 시 기존 임베딩 **전체 재계산**이 필요하므로 **첫 배포 전 비교 테스트로 결정**한다.
+> **모델 확정: `gemini-embedding-001`(768 절단).** 실데이터 3축 평가에서 비지도 silhouette 0.515 · 라벨 ARI 0.307 · RAG recall@5 0.931로 **세 축 모두 1위**였고, 768 절단으로 현 `Vector(768)` 스키마를 유지하며 Vertex로 LLM 분석과 인프라가 통일된다. 오픈소스 `KURE-v1`(한국어 검색 1위, 1024)은 RAG recall@5 0.862로 근소하게 뒤지고 1024 마이그레이션 비용이 들어 미채택. 금융 특화 모델(nmixx-bge-m3·kf-deberta)과 후속 `gemini-embedding-2`(v2)도 결정 지표에서 교체 실익이 없었다(전체 근거 → [평가 보고서](../evaluation/00-embedding-model-evaluation.md)). 모델 변경 시 임베딩 **전체 재계산**이 필요하므로 첫 배포 전에 못을 박았다.
 
 ---
 
-#### 후보 비교 축 (결정은 §11 테스트 이후)
+#### 후보 비교 축 (실데이터 평가로 gemini-embedding-001 확정 → §11)
 
 ```
 gemini-embedding-001 (768 절단)  ← Vertex 인프라 통일, 스키마 유지, MTEB 다국어 1위
@@ -154,13 +155,13 @@ KURE-v1 (1024)                   ← 한국어 검색 1위, 장문 RAG 강점 (�
 ko-sroberta-multitask (768)      ← 현재 코드 기본값, baseline
 ```
 
-환경 변수 (코드의 `EMBED_MODEL` 네이밍, **값은 테스트 후 확정**):
+환경 변수 (확정값):
 ```
-EMBED_MODEL=<비교 테스트 후 확정>   # 후보: gemini-embedding-001 / nlpai-lab/KURE-v1
-EMBED_DIM=<모델에 따라 768 또는 1024>
+EMBED_MODEL=gemini-embedding-001
+EMBED_DIM=768
 ```
 
-> **현재 코드 상태**: [.env.example](../../.env.example)는 `EMBED_MODEL=jhgan/ko-sroberta-multitask`(baseline), `EMBED_DIM` 없음, ORM `Vector(768)` 하드코딩. 모델 확정 시 `.env`·설정·스키마를 함께 갱신한다.
+> **현재 코드 상태**: [.env.example](../../.env.example)는 아직 `EMBED_MODEL=jhgan/ko-sroberta-multitask`(baseline)·`EMBED_DIM` 없음으로 남아 있어 **확정값(`gemini-embedding-001`·`EMBED_DIM=768`)으로 갱신 필요**. 확정 차원 768은 ORM `Vector(768)`과 일치하므로 스키마 변경은 없다.
 
 ---
 
@@ -273,18 +274,21 @@ CREATE INDEX idx_report_chunks_embedding
 | **중복 제거** | cosine ≥ 0.95 | 거의 동일한 기사 (받아쓰기 기사) |
 | **이슈 클러스터링** | cosine ≥ 0.80 | 같은 이슈를 다룬 다른 기사 |
 
-### 4.2 중복 제거 (cosine ≥ 0.95)
+### 4.2 중복 제거 (cosine ≥ 0.95) — 하드 삭제가 아니라 soft flag
+
+중복으로 판정된 기사는 **삭제하지 않고 `is_duplicate=TRUE`로 표시**한다. 같은 쌍 중 `published_at`이 늦은(나중에 수집된) 쪽을 표시하고, 더 이른 대표 기사는 클러스터링 대상으로 남긴다. 클러스터링·분석은 `is_duplicate=FALSE`만 읽는다.
 
 ```python
-async def deduplicate_by_similarity(
+async def flag_duplicates_by_similarity(
     db: AsyncSession,
     threshold: float = 0.95,
 ) -> int:
-    """임베딩 유사도 기반 중복 제거 — 당일 수집분 대상"""
+    """임베딩 유사도 기반 근접 중복 표시 — 당일 수집분 대상.
+    삭제하지 않고 is_duplicate=TRUE로 soft flag (재실행 멱등)."""
     # pgvector로 유사도 0.95 이상인 쌍 찾기
-    # 같은 쌍 중 published_at이 늦은 것(나중에 수집된 것)을 제거
+    # 같은 쌍 중 published_at이 늦은 것(나중에 수집된 것)을 표시
     query = """
-        DELETE FROM news
+        UPDATE news SET is_duplicate = TRUE
         WHERE id IN (
             SELECT n2.id
             FROM news n1
@@ -295,8 +299,11 @@ async def deduplicate_by_similarity(
         )
     """
     result = await db.execute(query, {"threshold": threshold})
+    await db.commit()
     return result.rowcount
 ```
+
+> **왜 삭제하지 않나**: 하드 `DELETE`는 ① 이미 적재된 `news_cluster`가 참조하는 행(`representative_news_id`·`member_news_ids` FK)을 지워 정합성을 위협하고, ② URL 유니크 레코드를 없애 다음 폴링에서 동일 기사를 재수집→재임베딩(비용 재발생)하게 만들며(`ON CONFLICT(url) DO NOTHING`이 무력화), ③ "그날 무엇이 중복으로 빠졌는지" 추적을 막는다. soft flag(`is_duplicate`)는 셋을 모두 피하고, 다른 단계가 전부 상태 컬럼 기반 soft handoff인 것과도 일관된다. 같은 플래그를 다시 세팅할 뿐이라 재실행도 멱등하다.
 
 ---
 
@@ -820,8 +827,8 @@ class EmbeddingClustererState(TypedDict):
 |------|------|
 | `embed_news` | `embedding=NULL` 뉴스 배치 임베딩 |
 | `embed_chunks` | `embedding=NULL` ReportChunk 배치 임베딩 |
-| `deduplicate` | cosine ≥ 0.95 중복 제거 |
-| `cluster` | cosine ≥ 0.80 이슈 클러스터링 |
+| `deduplicate` | cosine ≥ 0.95 근접 중복 표시 (`is_duplicate=TRUE`, 삭제 아님 — §4.2) |
+| `cluster` | cosine ≥ 0.80 이슈 클러스터링 (`is_duplicate=FALSE`만) |
 | `score_and_select` | 복합 중요도 스코어 계산 → `news_cluster` 적재 → 상위 10개 이슈 선정 |
 | `mark_analyzed` | 선정된 기사 `is_analyzed=False` 확인 (분석 파이프라인 인계 준비) |
 
@@ -874,7 +881,7 @@ async def run(self) -> EmbeddingClustererState:
 
 | 항목 | 내용 | 결정 시점 |
 |------|------|----------|
-| **임베딩 모델 최종 확정** | **미확정** — 아래 하니스로 후보(gemini-embedding-001 / KURE-v1 / ko-sroberta baseline) 비교 후 결정 | Phase 2 시작 전 |
+| **임베딩 모델 최종 확정** | ✅ **확정 — `gemini-embedding-001`(768)**. 3축 평가 세 축 모두 1위(→ [평가 보고서](../evaluation/00-embedding-model-evaluation.md)) | 완료(2026-06-09) |
 | **임베딩 텍스트 구성** | title 단독 시작. feed summary 결합(메모리 한정) 전환은 §2.2 실험으로 판단 | 클러스터링 구현 시 |
 | **스코어 가중치(W) 교정** | 신호별 가중치(현재 0.4/0.3/0.15/0.15 휴리스틱)를 실데이터로 튜닝. 학술 출처 없음 | Phase 구현 후 |
 | **Sentiment·Social 신호 통합** | Sentiment(LLM/FinBERT), Social(구글 트렌드 pytrends) 데이터 소스 연동 | MVP 이후 단계적 |
@@ -884,6 +891,8 @@ async def run(self) -> EmbeddingClustererState:
 | FinKRX 임베딩 버전 공개 여부 | LLM인지 임베딩 모델인지 확인, 공개 시 RAG 소스 임베딩에 적용 검토 | 모델 공개 후 |
 
 ### 임베딩 모델 비교 테스트 — 실행 하니스
+
+> ✅ **실행 완료(2026-06-09).** 후보를 최대 12종까지 넓혀 3축으로 평가했고 `gemini-embedding-001` 확정. 전체 기록·수치·재현법은 [임베딩 모델 평가 종합 보고서](../evaluation/00-embedding-model-evaluation.md). 아래는 그 하니스 설명이다.
 
 **원칙: 동일 라벨셋·동일 다운스트림에서 모델만 바꿔 끝까지 돌려 결과표 한 장으로 비교한다.** 모델별로 차원·정규화가 다르므로 cosine 분리도만 보지 말고 클러스터링·RAG까지 동일 조건으로 측정한다.
 
@@ -930,15 +939,15 @@ results = [benchmark(m, news_texts, pos_idx, neg_idx, gold_labels) for m in CAND
 
 **③ RAG 검색 품질** (report_chunks 임베딩까지 영향): 동일 쿼리셋(예: `"삼성전자 반도체 수익성"`)으로 모델별 `similarity_search(k=5)` 후 관련 청크 **recall@5**를 사람이 채점해 비교.
 
-**결과표 양식:**
+**결과표 (실측, 2026-06-09 — 전체는 [평가 보고서](../evaluation/00-embedding-model-evaluation.md)):**
 
-| 모델 | pair_auc | ari | silhouette | pos_mean / neg_mean | RAG recall@5 |
-|------|---------|-----|-----------|--------------------|--------------|
-| gemini-embedding-001 | | | | | |
-| KURE-v1 | | | | | |
-| ko-sroberta (baseline) | | | | | |
+| 모델 | pair_auc | ari | silhouette | RAG recall@5 |
+|------|---------|-----|-----------|--------------|
+| **gemini-embedding-001 (✅ 채택)** | 0.966 | **0.307** | **0.443** | **0.931** |
+| KURE-v1 (1024) | 0.971 | 0.227 | 0.364 | 0.862 |
+| ko-sroberta (baseline) | 0.915 | 0.213 | 0.337 | 0.690 |
 
-> **판정**: `pair_auc`·`ari`가 baseline 대비 유의하게 높고, gemini와 KURE 격차가 작으면 **스키마 유지·인프라 통일 이점이 있는 gemini-embedding-001 채택**. KURE가 RAG recall에서 크게 앞서면 1024 전환 비용을 감수하고 KURE 채택 검토.
+> **판정 결과**: `pair_auc`는 상위 3종이 박빙(KURE 0.971 ≈ 001 0.966)이었으나, 파이프라인 직결 지표인 `ari`(0.307)와 `RAG recall@5`(0.931)에서 001이 단독 1위였다. KURE와 격차가 작고 001이 768 스키마 유지·Vertex 인프라 통일 이점을 가지므로 **`gemini-embedding-001` 채택**. (금융 특화·v2 비교 포함 전체 근거는 평가 보고서.)
 
 **모델 전환 비용 고려**: 모델 변경 시 `news`, `report_chunks` 테이블의 임베딩 전체 재계산 + (1024 모델은) `Vector` 차원 마이그레이션 필요.  
 초기에 잘못 선택하면 대규모 재작업 발생 → **첫 번째 배포 전에 반드시 결정**.

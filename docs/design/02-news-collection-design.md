@@ -280,20 +280,23 @@ async def run_collection() -> list[dict]:
 ```python
 class NewsCollectorState(TypedDict):
     schedule: str
-    collected: list[dict]   # rss 수집 결과
-    saved: int              # upsert_news 저장 건수
-    errors: list[str]
+    collected: int           # 수집한 원시 기사 수
+    kept: int                # 전처리 통과(분석 대상) 수 — is_filtered=False
+    saved: int               # upsert_news가 새로 삽입한 수
+    failed_feeds: list[str]  # 수집 실패한 피드 식별자 (빈 리스트=전부 성공)
 
 # collect → preprocess → save 정적 순차 (분기·반복 없음 → Airflow Task)
-async def run(self, schedule: str) -> NewsCollectorState:
-    collected      = await rss_collector.collect()   # 16개 고정 RSS 폴링·KST 정규화
-    records, _stat = run_preprocessing(              # HTML·URL·필터·제목중복 (인메모리, →04)
+async def run(self, db, schedule: str) -> NewsCollectorState:
+    collected, failed_feeds = await rss_collector.collect()  # 16개 고정 RSS 폴링·KST 정규화
+    records, stats = run_preprocessing(              # HTML·URL·필터·제목중복 (인메모리, →04)
         [c.to_record() for c in collected]
     )
     saved = await upsert_news(db, records)           # 정제본 1회 저장 (ON CONFLICT url)
-    return {"schedule": schedule, "collected": records,
-            "saved": saved, "errors": []}
+    return {"schedule": schedule, "collected": len(collected), "kept": stats.kept,
+            "saved": saved, "failed_feeds": failed_feeds}
 ```
+
+> **State는 데이터가 아니라 보고다.** 반환값은 Airflow Task 결과(XCom)이므로 수집 레코드 전체가 아니라 **카운트와 실패 신호**만 담는다. 실제 데이터 핸드오프는 공유 DB의 상태 컬럼(`is_filtered`/`embedding`)으로 이뤄지므로(→ [01 §2](./01-pipeline-orchestration-design.md#2-전체-구조--데이터-핸드오프)), 레코드를 XCom에 실으면 비대해지고 DB 핸드오프 원칙과 어긋난다. `failed_feeds`는 16개 중 일부가 조용히 실패해도 Task가 성공으로 끝나는 부분 실패를 단계 경계로 끌어올려, 수집량 급감을 로그가 아닌 구조적 신호로 인지하게 한다.
 
 저장된 정제 뉴스(`is_filtered`로 분석 제외 표시)는 EmbeddingClusterer가 `is_filtered = FALSE AND embedding IS NULL`로 이어받는다(→ [01 §2](./01-pipeline-orchestration-design.md#2-전체-구조--데이터-핸드오프)). 전처리는 별도 단계가 아니라 수집 노드 안에서 인메모리로 처리된다(→ [04 §1.2](./04-preprocessing-design.md#12-전처리의-위치--수집전처리저장을-한-흐름으로)).
 
@@ -313,6 +316,7 @@ async def run(self, schedule: str) -> NewsCollectorState:
 | `published_at` | DateTime, nullable | **수집** (KST 정규화) | 기사 발행 시각 (피드에 없으면 NULL) |
 | `created_at` | DateTime | **저장** | DB 적재 시각 (server_default) |
 | `is_filtered` | Boolean (기본 `False`) | **전처리** | 24h 초과·제목 중복으로 분석 제외 시 `True` |
+| `is_duplicate` | Boolean (기본 `False`) | **임베딩(중복 제거)** | cosine ≥ 0.95 근접 중복 표시 — 삭제 대신 soft flag, 클러스터링·분석 제외 (→ [05 §4.2](./05-embedding-clustering-design.md#42-중복-제거-cosine--095--하드-삭제가-아니라-soft-flag)) |
 | `embedding` | Vector(768), nullable | **임베딩** | title 임베딩 (pgvector) |
 | `is_analyzed` | Boolean (기본 `False`) | **분석** | 분석 파이프라인 처리 여부 |
 
@@ -345,6 +349,7 @@ class News(Base):
     url              = Column(String(500), nullable=False)
     source           = Column(String(100), nullable=False)   # 피드 식별자 (region 도출 가능)
     is_filtered      = Column(Boolean, default=False)         # 전처리에서 분석 제외 표시
+    is_duplicate     = Column(Boolean, default=False)         # 임베딩 유사도(≥0.95) 근접 중복 — soft flag, 클러스터링·분석 제외 (삭제 아님 → 05 §4.2)
     # preprocessed_at: 인메모리 전처리 전환으로 미사용 — 마이그레이션으로 제거 예정 (→ 04 §7)
     embedding        = Column(Vector(768), nullable=True)                # title 임베딩
     is_analyzed      = Column(Boolean, default=False)
@@ -512,7 +517,7 @@ CompanyCollector           ─┘                                  ↓
 
 | 항목 | 내용 | 결정 시점 |
 |------|------|----------|
-| 임베딩 모델 선정 | **미확정** — 후보(`gemini-embedding-001` / `nlpai-lab/KURE-v1` / `ko-sroberta` baseline) 비교 테스트 후 결정. 정본은 [05 §2.1·§11](./05-embedding-clustering-design.md#21-임베딩-모델-비교) | Phase 2 시작 전 |
+| 임베딩 모델 선정 | ✅ **확정 — `gemini-embedding-001`(768)** (3축 평가 세 축 모두 1위 → [평가 보고서](../evaluation/00-embedding-model-evaluation.md), 정본 [05 §2.1](./05-embedding-clustering-design.md#21-임베딩-모델-비교)) | 완료(2026-06-09) |
 | 클러스터링 임계값 | 실제 뉴스 100건으로 교정 테스트 후 결정 | Phase 2 구현 후 |
 | 본문 fetch 품질 | trafilatura 성공률 및 페이월 비율 검증 | Phase 1 구현 후 테스트 |
 | 관심 종목 없는 초기 사용자 대응 | 기본 피드 뉴스만 제공할지 여부 | 기획 논의 필요 |

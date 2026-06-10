@@ -29,8 +29,8 @@ pytest --cov=app      # 커버리지 포함
 
 ## 참고 문서
 
-- [`docs/architecture.md`](docs/architecture.md) — 폴더 구조 및 레이어 설명
-- [`docs/conventions.md`](docs/conventions.md) — 파일명/클래스명/함수명 규칙
+- [`docs/rules/architecture.md`](docs/rules/architecture.md) — 폴더 구조 및 레이어 설명
+- [`docs/rules/conventions.md`](docs/rules/conventions.md) — 파일명/클래스명/함수명 규칙
 - [`.env.example`](.env.example) — 필요한 환경 변수 목록
 
 ## 코드 품질
