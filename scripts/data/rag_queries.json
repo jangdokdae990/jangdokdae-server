@@ -1,0 +1,40 @@
+{
+  "_doc": "사업보고서 RAG 검색 품질 비교용 라벨 쿼리셋(설계 05 §11 ③). 청크 본문은 DB(report_chunks)에서 로드하고, 여기엔 쿼리와 정답 청크의 DB id만 둔다. `python -m scripts.rag_recall_benchmark`로 모델별 recall@k·MRR을 비교. relevant_chunk_ids는 report_chunks.id(DB id) 기준 — 섹션 단위가 곧 정답 청크다.",
+  "_labeling": "각 쿼리는 특정 기업의 특정 섹션을 겨냥한다. 코퍼스 91청크 중 같은 유형 섹션(예: 여러 기업의 '원재료 및 생산설비')이 분산자로 섞여 있어, 모델이 기업명+주제를 함께 맞춰 정답 섹션을 상위로 올리는지 본다 — 분석 파이프라인 get_company_context가 요구하는 능력과 동일.",
+  "queries": [
+    {"query": "삼성전자 반도체 주요 원재료와 공급업체는 어디인가", "relevant_chunk_ids": [23]},
+    {"query": "삼성전자 부문별 매출 비중과 판매 실적", "relevant_chunk_ids": [24]},
+    {"query": "삼성전자 특허 라이선스 계약과 연구개발 투자", "relevant_chunk_ids": [26]},
+    {"query": "삼성전자 영업실적과 수익성 분석", "relevant_chunk_ids": [30]},
+    {"query": "삼성전자 외부감사인과 감사보수 내역", "relevant_chunk_ids": [34]},
+
+    {"query": "삼성물산 건설 부문 수주잔고와 매출 실적", "relevant_chunk_ids": [54]},
+    {"query": "삼성물산 건설 자재 등 주요 원재료 조달", "relevant_chunk_ids": [53]},
+    {"query": "삼성물산 부문별 영업실적과 재무상태", "relevant_chunk_ids": [60]},
+    {"query": "삼성물산 환율 등 위험관리와 파생거래", "relevant_chunk_ids": [55]},
+
+    {"query": "현대차 자동차 생산에 쓰이는 주요 원재료", "relevant_chunk_ids": [3]},
+    {"query": "현대차 차량 판매 실적과 지역별 매출", "relevant_chunk_ids": [4]},
+    {"query": "현대차 신기술 연구개발과 주요 계약", "relevant_chunk_ids": [6]},
+    {"query": "현대차 환율 변동 위험 관리와 파생상품", "relevant_chunk_ids": [5]},
+    {"query": "현대차 금융 부문 영업 현황과 할부금융", "relevant_chunk_ids": [8, 9]},
+    {"query": "현대차 영업이익과 재무상태 분석", "relevant_chunk_ids": [15]},
+
+    {"query": "카카오 사업부문별 매출 현황", "relevant_chunk_ids": [69]},
+    {"query": "카카오 연구개발 활동과 주요 계약", "relevant_chunk_ids": [71]},
+    {"query": "카카오 매출 성장과 영업손익 실적", "relevant_chunk_ids": [75]},
+    {"query": "카카오 환위험 등 위험관리 및 파생거래", "relevant_chunk_ids": [70]},
+
+    {"query": "KB금융 BIS 자기자본비율 등 재무건전성 지표", "relevant_chunk_ids": [98]},
+    {"query": "KB금융 파생상품 거래 규모와 현황", "relevant_chunk_ids": [96]},
+    {"query": "KB금융 은행 카드 등 영업의 현황", "relevant_chunk_ids": [95]},
+    {"query": "KB금융 순이익과 자산 규모 등 영업실적", "relevant_chunk_ids": [101]},
+    {"query": "KB금융 자금조달과 유동성 관리", "relevant_chunk_ids": [102]},
+
+    {"query": "하나금융지주 자본적정성과 BIS 자기자본비율", "relevant_chunk_ids": [85]},
+    {"query": "하나금융지주 파생상품 거래 현황", "relevant_chunk_ids": [83]},
+    {"query": "하나금융지주 당기순이익과 재무상태 영업실적", "relevant_chunk_ids": [88]},
+    {"query": "하나금융지주 은행 등 영업의 현황", "relevant_chunk_ids": [82]},
+    {"query": "하나금융지주 유동성과 자금조달 지출", "relevant_chunk_ids": [89]}
+  ]
+}

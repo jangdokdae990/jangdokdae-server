@@ -45,6 +45,15 @@ DEFAULT_N_TITLES = 400
 DEFAULT_MODEL = "gemini-embedding-001"
 _KOREAN_FONT = "/System/Library/Fonts/Supplemental/AppleGothic.ttf"
 
+# t-SNE 축은 고차원 임베딩을 2D로 압축한 좌표라 축 값·방향 자체엔 의미가 없다(거리·이웃만 의미).
+_AXIS_X = "t-SNE 1 (축 값 자체는 의미 없음 · 점 사이 거리만 해석)"
+_AXIS_Y = "t-SNE 2 (축 값 자체는 의미 없음 · 점 사이 거리만 해석)"
+_CAPTION = (
+    "t-SNE: 고차원 임베딩을 2D로 압축한 그림. 축 값·방향엔 의미가 없고, 점이 가까울수록 "
+    "임베딩이 유사(같은 이슈 가능성↑)합니다. 색 = 클러스터, 회색 = noise(단독 기사)."
+)
+_CAPTION_HTML = _CAPTION + " 점에 마우스를 올리면 기사 제목이 표시됩니다."
+
 
 def _setup_korean_font() -> None:
     """matplotlib에 한글 폰트를 등록한다 — 없으면 제목이 □□로 깨진다(macOS 기준)."""
@@ -52,6 +61,10 @@ def _setup_korean_font() -> None:
         font_manager.fontManager.addfont(_KOREAN_FONT)
         plt.rcParams["font.family"] = font_manager.FontProperties(fname=_KOREAN_FONT).get_name()
     plt.rcParams["axes.unicode_minus"] = False  # 마이너스 기호 깨짐 방지
+
+
+# import 시 1회 등록 — 이 모듈을 import하는 모든 스크립트(실험 드라이버 포함)에 폰트 적용
+_setup_korean_font()
 
 
 def project_2d(embeddings: np.ndarray) -> np.ndarray:
@@ -108,10 +121,18 @@ def save_plotly_html(
     fig = px.scatter(
         x=coords[:, 0], y=coords[:, 1], color=label_str, hover_name=titles,
         title=f"뉴스 임베딩 클러스터링 (t-SNE 2D) — {model_name}",
-        labels={"x": "", "y": "", "color": "cluster"},
+        labels={"x": _AXIS_X, "y": _AXIS_Y, "color": "cluster"},
     )
     fig.update_traces(marker={"size": 8})
-    fig.update_layout(showlegend=False)  # 클러스터가 많아 범례는 끄고 hover로 본다
+    # 축 눈금값은 의미가 없으므로 숨기고, 하단에 축·색 의미 캡션을 단다.
+    fig.update_xaxes(showticklabels=False)
+    fig.update_yaxes(showticklabels=False)
+    # 클러스터가 많아 범례는 끄고 hover로 본다. 하단 여백(margin b)은 캡션 공간.
+    fig.update_layout(showlegend=False, margin={"b": 110})
+    fig.add_annotation(
+        text=_CAPTION_HTML, xref="paper", yref="paper", x=0, y=-0.13,
+        showarrow=False, align="left", font={"size": 12},
+    )
     fig.write_html(str(path))
 
 
@@ -128,8 +149,12 @@ def save_matplotlib_png(
         c=labels[clustered], cmap="tab20", s=18,
     )
     ax.set_title(f"뉴스 임베딩 클러스터링 (t-SNE 2D) — {model_name}")
-    ax.set_xticks([])
+    ax.set_xlabel(_AXIS_X)
+    ax.set_ylabel(_AXIS_Y)
+    ax.set_xticks([])  # 축 눈금값은 의미 없음 — 숨긴다
     ax.set_yticks([])
+    # 하단 캡션 — 축·색·거리의 의미 설명
+    fig.text(0.5, 0.005, _CAPTION, ha="center", va="bottom", fontsize=10, wrap=True)
     fig.savefig(path, dpi=120, bbox_inches="tight")
     plt.close(fig)
 

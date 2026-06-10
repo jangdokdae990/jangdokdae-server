@@ -34,6 +34,7 @@ from services.embedder.embedding_client import EmbeddingClient, embed_with
 # 비교 대상 — 관리형 1 + 오픈소스 2(baseline 포함). 설계 05 §11.
 CANDIDATE_MODELS = [
     "gemini-embedding-001",         # Vertex AI, 768 절단, MTEB Multilingual 1위 (관리형 후보)
+    "gemini-embedding-2-preview",   # 후속 v2(genai, 8192토큰), us-central1 전용 — 001과 비교
     "nlpai-lab/KURE-v1",            # 한국어 검색 특화, MTEB-ko 1위 (1024)
     "jhgan/ko-sroberta-multitask",  # 현재 코드 기본값 — baseline
 ]
