@@ -193,6 +193,24 @@ class EmbeddingClient:
         return np.array(self.embed_documents(texts, task_type), dtype=np.float32)
 
 
+class LazyClientMixin:
+    """클라이언트를 lazy 보유하는 임베더 공통 베이스 — 첫 접근에서 생성한다.
+
+    백엔드 구축(특히 HuggingFace 가중치 로딩)이 무거우므로 임베딩할 행이 실제로 있을 때만
+    만든다(no-op 실행 비용 0). 공유가 필요하면(여러 임베더가 같은 모델) 호출부가 만든
+    인스턴스를 주입한다. 사용처: NewsEmbedder·ReportEmbedder.
+    """
+
+    def __init__(self, client: EmbeddingClient | None = None) -> None:
+        self._client = client
+
+    @property
+    def client(self) -> EmbeddingClient:
+        if self._client is None:
+            self._client = EmbeddingClient()
+        return self._client
+
+
 def embed_with(
     model_name: str, texts: list[str], task_type: EmbedTaskType = "CLUSTERING"
 ) -> np.ndarray:
