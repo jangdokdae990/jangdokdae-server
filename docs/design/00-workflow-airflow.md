@@ -25,6 +25,9 @@
 
 ## 목차
 
+**[기초]**
+- [0. Airflow 기초 — 무엇이고, 왜 필요하고, 어떻게 생겼는가](#0-airflow-기초--무엇이고-왜-필요하고-어떻게-생겼는가)
+
 **[기획]**
 - [1. 왜 Airflow인가](#1-왜-airflow인가)
 - [2. 경계 기준 — 흐름 제어(Flow Control)](#2-경계-기준--흐름-제어flow-control)
@@ -42,6 +45,104 @@
 
 ---
 
+# [기초]
+
+> **Airflow 자체에 대한 배경지식.** 장독대 설계 결정([기획]·[설계])을 읽기 전에 필요한 최소한의 Airflow 이해를 정리한다. 이미 Airflow를 아는 독자는 [1장](#1-왜-airflow인가)으로 건너뛰어도 된다.
+
+## 0. Airflow 기초 — 무엇이고, 왜 필요하고, 어떻게 생겼는가
+
+### 0.1 Airflow란
+
+**Apache Airflow는 워크플로우를 파이썬 코드로 정의하고, 스케줄에 따라 실행하고, 상태를 모니터링하는 오픈소스 오케스트레이션 플랫폼**이다. 
+
+핵심 철학은 **"Workflow as Code"** — 워크플로우를 GUI나 XML이 아니라 **파이썬 코드(DAG 파일)로 선언**한다. 그래서 버전 관리(git)·코드 리뷰·테스트가 일반 코드와 동일하게 적용되고, 동적 생성(반복문으로 Task 생성)도 가능하다.
+
+> 한 줄 요약: **"cron + 의존성 그래프 + 재시도 + 실행 이력 UI"를 코드로 선언하는 플랫폼.**
+
+### 0.2 왜 필요한가 — cron만으로 안 되는 이유
+
+단순히 "정해진 시각에 스크립트 실행"이라면 cron으로 충분하다. 문제는 파이프라인이 **여러 단계의 의존 관계**가 되는 순간부터다.
+
+| cron의 한계 | 무슨 일이 생기나 | Airflow의 해법 |
+|------|------|------|
+| **의존성 표현 불가** | "수집이 끝나면 임베딩"을 시간 간격 추정으로 흉내 (`09:00 수집, 09:30 임베딩`) → 수집이 늦어지면 빈 데이터로 임베딩 실행 | DAG 의존성(`수집 >> 임베딩`)으로 **선행 성공 시에만** 실행 |
+| **부분 실패 처리 부재** | 3단계 중 2단계가 죽으면? 전체 재실행 or 수동 복구 | 실패한 Task만 **선언적 재시도**(`retries`), 성공한 단계는 건너뜀 |
+| **실행 이력 없음** | "어제 새벽 적재가 왜 비었지?"를 로그 grep으로 추적 | Web UI에서 run별 성공/실패/소요시간/로그 한눈에 (observability) |
+| **과거 구간 재처리(backfill) 수동** | 장애로 3일치가 빠지면 날짜 바꿔가며 수동 실행 | `backfill` 명령으로 기간 지정 일괄 재실행 |
+| **알림 없음** | 실패를 다음 날 발견 | 실패 시 콜백·알림 내장 |
+
+요컨대 cron은 **"언제"**만 알고, Airflow는 **"언제 + 어떤 순서로 + 실패하면 어떻게"**까지 안다. 장독대 파이프라인(수집 2종 병렬 → 임베딩·클러스터링 → 분석)이 정확히 이 의존성·부분 실패 문제를 갖는다 — 구체적 도구 비교는 [10장](#10-airflow를-선택한-이유-vs-apscheduler)을 참조한다.
+
+### 0.3 기본 아키텍처
+
+Airflow 3.x는 역할별로 분리된 **서비스들의 모임**이다. 각 서비스는 메타데이터 DB를 중심으로 통신한다.
+
+```
+                    ┌──────────────┐
+   DAG 파일(dags/) → │ DAG Processor │ ─ 파싱·직렬화 ─┐
+                    └──────────────┘               ▼
+                    ┌──────────────┐        ┌─────────────┐
+        사용자 ←──── │  API Server  │ ←────→ │ Metadata DB │ ← 모든 상태의 단일 출처
+       (Web UI)     └──────────────┘        │ (PostgreSQL) │   (run·task 상태, 스케줄, 이력)
+                    ┌──────────────┐        └─────────────┘
+                    │  Scheduler   │ ─ "실행할 때가 된 Task" 판정 ─→ Executor → ┌────────┐
+                    └──────────────┘                                          │ Worker │ ← Task 실제 실행
+                    ┌──────────────┐                                          └────────┘
+                    │  Triggerer   │ ← 비동기 대기(deferrable) 전담
+                    └──────────────┘
+```
+
+| 컴포넌트 | 역할 | 장독대 관점 |
+|------|------|------|
+| **Scheduler** | 심장. DAG의 스케줄·의존성을 보고 "지금 실행할 Task"를 결정 | 평일 09:00/15:30 트리거 판정 |
+| **DAG Processor** | `dags/` 폴더의 파이썬 파일을 주기적으로 파싱해 DB에 직렬화 (3.x에서 별도 서비스로 분리) | `dags/jangdokdae_*.py` 3개 파싱 |
+| **API Server** | Web UI·REST API 제공. Task↔DB 사이의 중개자 (3.x에서 webserver를 대체) | 실행 이력·로그 확인 창구 |
+| **Worker / Executor** | Task를 실제 실행. Executor가 실행 방식을 결정 — LocalExecutor(단일 머신 프로세스)부터 Celery/Kubernetes(분산)까지 | 시연 규모는 **LocalExecutor로 충분** |
+| **Triggerer** | 외부 이벤트 대기(deferrable operator)를 워커 점유 없이 비동기 처리 | 당장 미사용 (시각 기반 스케줄만) |
+| **Metadata DB** | 모든 상태(run·task instance·스케줄·이력)의 단일 출처 | Airflow 전용 DB — 장독대 데이터 DB(Neon)와 **별개** |
+
+> **Airflow 3의 보안 변화**: Task 코드가 메타데이터 DB에 직접 접근하는 것이 차단됐다(Task SDK·API Server 경유). 장독대 Task는 어차피 자체 DB(Neon)만 만지므로 영향 없다 — 오히려 "Airflow의 상태 저장소와 우리 데이터 저장소는 별개"라는 경계가 명확해진다.
+
+### 0.4 핵심 개념
+
+| 개념 | 정의 | 장독대 대응 |
+|------|------|------|
+| **DAG** (Directed Acyclic Graph) | 워크플로우 1개 = Task들의 방향 비순환 그래프. 순환이 없어야 "언젠가 끝남"이 보장된다 | `jangdokdae_pipeline`·`jangdokdae_macro`·`jangdokdae_quarterly` 3개 |
+| **Task / Operator** | Task = 실행 단위 1개. Operator는 Task의 템플릿(PythonOperator, BashOperator 등) | 각 단계(NewsCollector 등)를 PythonOperator로 호출 (→ [8장](#8-dag-구현)) |
+| **Task Instance** | 특정 run에서의 Task 실행 1회. 상태(success/failed/retry)를 가진다 | 09:00 run의 `collect_news` 1회 |
+| **DAG Run** | DAG의 실행 1회 (스케줄 또는 수동 트리거) | "1 run = 전체 완주" (→ [7.1](#71-메인-파이프라인-dag--1-run--전체-자동-완주)) |
+| **schedule / catchup** | cron 표현식으로 주기 정의. `catchup=True`면 과거 미실행 구간을 소급 실행 | `0 9 * * 1-5`. **catchup=False** — 뉴스는 과거 소급이 무의미(24h 창) |
+| **backfill** | 지정 기간의 run을 일괄 (재)실행 | 거시지표·공시는 자체 backfill 스크립트로 이미 처리 — Airflow backfill과 역할 중복 없음 |
+| **retries / retry_delay** | Task 실패 시 선언적 재시도 | `retries=2, retry_delay=60` (→ [7.3](#73-실패-처리재개-멘토-saga-피드백)) |
+| **XCom** | Task 간 소량 데이터 전달 (메타데이터 DB 경유) | **의도적으로 최소화** — 단계 간 데이터는 공유 DB 상태 컬럼으로 전달하고, XCom엔 카운트·신호만 (→ [01 §2](./01-pipeline-orchestration-design.md)) |
+| **Connection / Hook** | 외부 시스템 접속 정보의 중앙 관리 + 접속 클라이언트 | 미사용 — 접속 정보는 기존 `.env`/settings 체계 유지 (도구 이원화 방지) |
+| **Sensor / Deferrable** | "조건이 충족될 때까지 대기"하는 특수 Task | 당장 미사용 — 시각 기반 스케줄로 충분 |
+| **멱등성** (Airflow가 전제하는 성질) | 같은 run을 재실행해도 결과가 같아야 재시도가 안전하다 | 전 단계 ON CONFLICT·상태 컬럼으로 보장 — 재시도는 "원복"이 아니라 "재개" (→ [7.3](#73-실패-처리재개-멘토-saga-피드백)) |
+
+> **개념 간 관계 한 줄**: DAG가 Task를 묶고, Scheduler가 DAG Run을 만들고, Executor가 Task Instance를 Worker에서 돌리고, 상태는 전부 Metadata DB에 남는다.
+
+### 0.5 기업·실무 활용 사례
+
+Airflow가 실무에서 쓰이는 대표 패턴과 공개된 사례들이다. **공통점: "여러 소스에서 모아 → 가공 → 적재 → 후속 작업"의 정형 파이프라인을 스케줄로 돌린다** — 장독대 파이프라인과 동형이다.
+
+| 활용 패턴 | 설명 | 공개 사례 |
+|------|------|------|
+| **ETL / ELT 데이터 파이프라인** (가장 고전적) | 여러 소스 → 변환 → 데이터 웨어하우스(Snowflake·BigQuery 등) 적재. 일/시간 단위 스케줄 | **Airbnb**(탄생 배경 — 사내 전 데이터 파이프라인), 국내 다수 테크 기업(쏘카·라인 등)의 데이터 플랫폼 기술 블로그 |
+| **ML/AI 파이프라인** | 데이터 준비 → 학습 → 평가 → 배포 주기 실행. State of Airflow 2025 기준 관리형(Astro) 사용자의 **55%가 ML/AI 워크로드**에 사용 | 추천 시스템 재학습, 피처 스토어 갱신 |
+| **대규모 멀티테넌트 오케스트레이션** | 수천 개 DAG를 단일 플랫폼에서 운영 | **Shopify**(수천 DAG 운영 경험 공개), **Pinterest**(자체 워크플로우 플랫폼의 기반) |
+| **리포팅·집계 자동화** | 일·주·월 단위 지표 집계와 리포트 발송 | 매출 마감, 일일 대시보드 갱신 |
+| **외부 API 주기 수집** | 외부 API를 정해진 주기로 폴링해 적재, 실패 시 재시도 | **장독대가 정확히 이 패턴** — RSS·DART·ECOS 수집 → 임베딩 → 분석 |
+
+장독대 기준으로 보면: 우리는 "외부 API 주기 수집 + ETL" 패턴의 소형 사례이고, `analyze` Task 내부에 LLM 에이전트(L2)가 들어가는 점이 최근 추세(Airflow 위에 AI 워크로드)와 정확히 겹친다.
+
+**참고 자료**
+- [Airflow Architecture Overview (공식, 3.x)](https://airflow.apache.org/docs/apache-airflow/stable/core-concepts/overview.html)
+- [Airflow Components (Astronomer)](https://www.astronomer.io/docs/learn/airflow-components)
+- [State of Airflow 2025 (Astronomer — 채택 규모·ML 워크로드 통계)](https://www.astronomer.io/blog/state-of-airflow-2025-unleashing-the-future-of-data-orchestration/)
+- [Apache Airflow 프로젝트 연혁 (공식)](https://airflow.apache.org/docs/apache-airflow/stable/project.html)
+
+---
+
 # [기획]
 
 > **왜 하는가 · 무엇을 만들 것인가.**
@@ -50,67 +151,30 @@
 
 ## 1. 왜 Airflow인가
 
-장독대 파이프라인은 `수집 → 전처리 → 임베딩·클러스터링 → 엔티티 추출 → 분석 → Issue Docent` 6단계로 이어진다. 이 흐름의 대부분은 **정해진 시각에, 정해진 순서로, 정형 작업**을 돌리는 일이다.
+장독대 파이프라인 대부분은 **정해진 시각에, 정해진 순서로 도는 정형 작업**이다 — 필요한 것은 스케줄링(평일 09:00/15:30 등), 의존성·병렬, 선언적 재시도, 실행 이력(observability)이고, 이 영역의 특화 도구가 Airflow다. LangGraph는 이 중 어느 것도 잘하지 못한다(→ [3장](#3-두-도구의-강점과-한계)).
 
-이런 작업에는 다음이 필요하다.
-
-| 필요 | 설명 |
-|------|------|
-| 스케줄링 | 평일 09:00 / 15:30 / 16:30, 분기 첫날 등 시각 기반 실행 |
-| 의존성·병렬 | "수집 2종 병렬 → 전처리 → 임베딩" 같은 단계 간 순서 보장 |
-| 재시도 정책 | API 일시 실패 시 선언적 재시도 |
-| 실행 이력·관망 | 어느 단계가 언제 성공/실패했는지 한눈에 (observability) |
-
-LangGraph는 이 중 어느 것도 잘하지 못한다(→ [3장](#3-두-도구의-강점과-한계)). 반대로 Airflow는 이 영역에 특화돼 있다.
-따라서 **파이프라인의 실행 골격은 Airflow가 잡고**, 추론이 필요한 일부 단계의 내부만 LangGraph 에이전트에 위임한다.
-
-핵심은 **둘은 경쟁이 아니라 계층**이라는 점이다. Airflow가 바깥 골격(언제·어떤 순서로)을 잡고, 추론이 필요한 Task **내부**에서 LangGraph가 동작한다.
+**둘은 경쟁이 아니라 계층**이다 — Airflow가 바깥 골격(언제·어떤 순서로)을 잡고, 추론이 필요한 Task **내부**에서 LangGraph가 동작한다.
 
 ## 2. 경계 기준 — 흐름 제어(Flow Control)
 
-경계를 가르는 기준은 **"LLM을 쓰느냐"가 아니다.**
-**다음 단계로 갈 흐름을 LLM 판단으로 정하느냐**가 기준이다.
+경계 기준은 **"LLM을 쓰느냐"가 아니라 "다음 단계로 갈 흐름을 LLM 판단으로 정하느냐"**다.
 
 | 질문 | 예 → 배치 |
 |------|----------|
 | 다음에 무엇을 할지가 **LLM의 추론**으로 갈린다 (분기·반복) | **LangGraph** |
-| 입력 → 출력이 고정돼 있고, 분기가 있어도 **정적**이다 (schedule, 고정 규칙) | **Airflow Task** |
+| 입력 → 출력이 고정, 분기가 있어도 **정적** (schedule, 고정 규칙) | **Airflow Task** |
 
-핵심은 **정형 LLM 호출은 LangGraph가 아니다**라는 점이다.
-임베딩 API 호출, 고정 스키마로 엔티티를 뽑는 LLM 호출은 "입력 → 출력"이 고정이므로 — LLM을 쓰더라도 — Airflow Task로 둔다.
-
-```
-한 단계를 만났을 때:
-
-  이 단계 다음에 "무엇을 할지"가
-  LLM 판단으로 달라지는가?
-        │
-   ┌────┴────┐
-  YES        NO
-   │          │
-   ▼          ▼
-LangGraph   분기가 있는가?
-  노드        │
-        ┌─────┴─────┐
-       YES          NO
-   (정적 분기)    (단순 순차)
-        │            │
-        ▼            ▼
-   Airflow       Airflow
-  분기 Task       Task
-```
+따라서 **정형 LLM 호출은 LangGraph가 아니다** — 임베딩 API, 고정 스키마 엔티티 추출은 LLM을 쓰더라도 흐름이 정적이므로 Airflow Task다.
 
 ## 3. 두 도구의 강점과 한계
 
-멘토 핵심 질문에 대한 직접 답 — **두 도구가 "못하는 것"을 명시**한다.
+멘토 핵심 질문("컴포넌트 각각의 한계를 정의했는가")에 대한 직접 답 — **못하는 것**을 명시한다.
 
 | | Airflow | LangGraph |
 |---|---------|-----------|
 | **잘하는 것** | 스케줄링, 재시도 정책, 실행 이력 UI, DAG 의존성·병렬, 분산 실행 | LLM 기반 동적 흐름 제어, 조건부 분기, 상태 누적, 추론 루프 |
-| **못하는 것 (한계)** | LLM 판단에 따른 **동적 흐름**·**추론 루프** 불가. 분기는 사전 정의된 정적 분기만 | 스케줄링·재시도 이력·전체 파이프라인 **관망(observability)** 없음. cron·catchup 부재 |
-| **그래서** | 정형·정적 단계의 **실행 골격** | 추론이 필요한 단계의 **내부 두뇌** |
-
-두 도구는 **경쟁이 아니라 계층**이다. Airflow가 바깥 골격(언제·어떤 순서로)을 잡고, 추론이 필요한 Task **내부**에서 LangGraph가 동작한다.
+| **못하는 것** | LLM 판단 **동적 흐름·추론 루프** 불가 — 분기는 정적 분기만 | 스케줄링·재시도 이력·파이프라인 **observability** 없음. cron·catchup 부재 |
+| **그래서** | 정형 단계의 **실행 골격** | 추론 단계의 **내부 두뇌** |
 
 ## 4. 파이프라인 7단계 배치 매핑
 
@@ -119,7 +183,7 @@ CLAUDE.md 파이프라인 `수집 → 전처리 → 임베딩·클러스터링 �
 | # | 단계 | 배치 | 흐름제어에 LLM 추론? | 근거 |
 |---|------|------|:---:|------|
 | 1 | **뉴스 수집** | **Airflow Task** | ❌ | `collect → save` **정적 순차**(수집 전용). 클러스터링·스코어링은 임베딩·클러스터링 단계(5번)로 분리 (→ [5.2](#52-뉴스-수집-정적-순차--airflow-task로-교정)) |
-| 2 | **기업 수집** | **Airflow Task** | ❌ | `schedule`(morning/afternoon/macro/quarterly) 분기는 **정적**. DART·거시 API 호출은 입출력 고정 (주가·환율은 분석 시점 on-demand 조회) (→ [5.1](#51-기업-수집-기존-langgraph-설계--airflow-task로-교정)) |
+| 2 | **기업 수집** | **Airflow Task** | ❌ | `schedule`(morning/afternoon/macro/quarterly) 분기는 **정적**. DART·거시 API 호출은 입출력 고정 (주가·환율은 분석 시점 on-demand 조회) (→ [5.1](#51-기업-수집-langgraph--airflow-task로-교정)) |
 | 3 | **전처리** | **Airflow Task** | ❌ | HTML 정제·타임존 정규화·날짜 필터·중복 제거 = **고정 규칙**. 분기 없음 |
 | 4 | **임베딩** | **Airflow Task** | ❌ | Vertex AI 임베딩 API 호출. 입력(텍스트) → 출력(벡터)이 고정 |
 | 5 | **클러스터링·스코어링** | **Airflow Task** | ❌ | 벡터 유사도(cosine) 클러스터링 + 복합 중요도 스코어(볼륨·속도 등). 결정적·정형, 분기·반복 없음 |
@@ -130,21 +194,15 @@ CLAUDE.md 파이프라인 `수집 → 전처리 → 임베딩·클러스터링 �
 
 ## 5. 경계 케이스 해설
 
-### 5.1 기업 수집: 기존 LangGraph 설계 → Airflow Task로 교정
+과거 LangGraph로 설계됐다가 [2장 기준](#2-경계-기준--흐름-제어flow-control)으로 Airflow Task로 교정한 두 사례 — 기준은 항상 "다음 행동을 LLM 추론으로 정하는가"다.
 
-[CompanyCollector](./03-company-data-collection-design.md#7-수집-파이프라인-아키텍처)는 본래 LangGraph 그래프로 설계됐다. 그러나 [2장 흐름 제어 기준](#2-경계-기준--흐름-제어flow-control)을 적용하면 — `schedule` 라우팅은 **LLM 추론이 아니라 사전 정의된 정적 분기**이고, 각 수집기 호출도 입출력이 고정이다. 추론 분기가 없으므로 **Airflow Task가 더 적합**하다.
+### 5.1 기업 수집: LangGraph → Airflow Task로 교정
 
-- **교정 내용**: 기업 수집의 `route` 분기는 Airflow DAG의 정적 분기(또는 `BranchPythonOperator`)로 표현하고, 각 수집기는 독립 Task로 둔다.
-- **01 문서와의 관계**: 01의 State·노드 구성은 "수집기 묶음"의 논리적 단위로는 유효하나, **실행 골격은 LangGraph 그래프가 아니라 Airflow Task 그룹**으로 본다.
+`schedule`(morning/afternoon/macro/quarterly) 라우팅은 LLM 추론이 아니라 **사전 정의된 정적 분기**이고 각 수집기 호출도 입출력 고정 → Airflow Task. 01의 State·노드 구성은 논리 단위로는 유효하되, 실행 골격은 Airflow Task 그룹이다.
 
 ### 5.2 뉴스 수집: 정적 순차 → Airflow Task로 교정
 
-[NewsCollector](./02-news-collection-design.md#7-뉴스-수집-단계)는 과거 `collect → cluster → score → finalize` 그래프로 설계됐다. 그러나 클러스터·스코어는 클러스터(기사 그룹) 단위 평가라 임베딩·클러스터링 단계의 몫이고, 이를 분리하면 NewsCollector는 `collect → save` **수집 전용**으로 단순해진다. 분리 후에도 `cluster`(pgvector cosine)·`score`(복합 중요도 산술)는 결정적 연산이고 분기·반복이 없다. [2장 흐름 제어 기준](#2-경계-기준--흐름-제어flow-control)상 다음 행동을 LLM 추론으로 정하는 지점이 없으므로 수집·클러스터링·스코어링 모두 **Airflow Task가 적합**하다.
-
-- **교정 내용**: 수집(`collect → save`)은 NewsCollector Task로, `cluster`·`score`는 임베딩·클러스터링 단계(EmbeddingClusterer) Task로 분리한다 (→ [05 §6·§8](./05-embedding-clustering-design.md#6-주요-이슈-선정--복합-중요도-스코어)).
-- **폐기된 근거**: 과거 "수집 후 충분한가 판단 → 부족하면 추가 검색 루프"로 기술됐으나, 그런 LLM 판단 루프는 설계에 없다. 해당 근거는 폐기한다.
-
-> **원칙 재확인**: 기준은 "LLM을 쓰는가"가 아니라 "다음 행동을 LLM 추론으로 정하는가"다. 뉴스 수집은 LLM 흐름 제어가 없어 — 그래프 형태로 묶이더라도 — Airflow Task로 둔다. (기업 수집 5.1과 동일한 교정.)
+과거 `collect → cluster → score → finalize` 그래프 설계에서 — 클러스터·스코어는 클러스터(기사 그룹) 단위 평가라 **임베딩·클러스터링 단계(05)의 몫**으로 분리하고, NewsCollector는 `collect → save` 수집 전용으로 단순화했다. 분리 후 남는 연산도 전부 결정적이라 Airflow Task. (과거의 "부족하면 추가 검색 루프" 근거는 설계에 없는 가공의 루프라 폐기.)
 
 ---
 
@@ -156,22 +214,18 @@ CLAUDE.md 파이프라인 `수집 → 전처리 → 임베딩·클러스터링 �
 ## 6. 전체 구조
 
 ```
-Airflow DAG (dags/jangdokdae_pipeline.py)   ← 오케스트레이션: 스케줄·의존성·재시도·이력
+Airflow DAG (dags/jangdokdae_pipeline.py)   ← 스케줄·의존성·재시도·이력
    │  각 Task가 단계를 직접 호출 (단계 간 데이터는 공유 DB로 전달)
    │
-   ├─ collect_news    → NewsCollector       (정적 순차)   ┐
-   ├─ collect_company → CompanyCollector     (정적 분기)  │  (위 둘 병렬)
-   │                                                      │ 공유 DB
-   ├─ preprocess      → Preprocessor                      │ (PostgreSQL)
-   ├─ embed_cluster   → EmbeddingClusterer                │
-   └─ analyze         → NewsAnalysisAgent  (L2 에이전트)  ┘
-                            │
+   ├─ collect_news    → NewsCollector (수집→전처리 인메모리→저장) ┐ (병렬)
+   ├─ collect_company → CompanyCollector (정적 분기)              │ 공유 DB
+   ├─ embed_cluster   → EmbeddingClusterer                        │ (PostgreSQL)
+   └─ analyze         → NewsAnalysisAgent (L2 에이전트)           ┘
                             ▼
                      Issue Docent  (→ 06 §18)
 ```
 
-**핵심 원칙**: 단계끼리 직접 호출하지 않는다. **공유 DB를 통해서만 데이터를 전달**한다(상태 핸드오프). 오케스트레이션(실행 순서·병렬·재시도)은 **Airflow DAG가 전담**한다 — 별도 "마스터 오케스트레이터" 객체는 두지 않는다(→ [9장](#9-파이프라인-러너-하이브리드-로컬-실행)).
-정형 단계(L1)의 내부 설계(State·노드·도구)는 [파이프라인 오케스트레이션](./01-pipeline-orchestration-design.md), 분석 단계(L2)의 멀티 에이전트 설계는 [06 §18](./06-news-analysis-design.md#18-newsanalysisagent-설계)를 참조한다.
+**핵심 원칙**: 단계끼리 직접 호출하지 않고 **공유 DB 상태 핸드오프**로만 전달(→ [01 §2](./01-pipeline-orchestration-design.md#2-전체-구조--데이터-핸드오프)). 오케스트레이션은 **Airflow DAG가 전담** — 별도 "마스터 오케스트레이터" 객체는 두지 않는다(→ [9장](#9-파이프라인-러너-하이브리드-로컬-실행)). 전처리는 별도 Task가 아니라 NewsCollector 내부 인메모리 모듈이다(→ [04 §1.2](./04-preprocessing-design.md#12-전처리의-위치--수집전처리저장을-한-흐름으로)).
 
 ## 7. DAG 구성
 
@@ -212,81 +266,49 @@ collect_news ∥ collect_company → preprocess → embed_cluster → analyze
 ## 8. DAG 구현
 
 ```python
-# dags/jangdokdae_pipeline.py
+# dags/jangdokdae_pipeline.py — 골격 (분석 06 구현 전까지 3-Task로 운영)
 import asyncio
 from datetime import datetime
 from airflow import DAG
 from airflow.operators.python import PythonOperator
+from app.db.base import AsyncSessionLocal
 from services.pipeline.news_collector import NewsCollector
 from services.pipeline.company_collector import CompanyCollector
-from services.pipeline.preprocessor import Preprocessor
 from services.pipeline.embedding_clusterer import EmbeddingClusterer
-from services.pipeline.news_analysis_agent import NewsAnalysisAgent
 
-# 각 Task가 단계를 직접 호출 (오케스트레이터 객체 없음)
-def collect_news_task(**ctx):    asyncio.run(NewsCollector().run("scheduled"))
-def collect_company_task(**ctx): asyncio.run(CompanyCollector().run("scheduled"))
-def preprocess_task(**ctx):      asyncio.run(Preprocessor().run())
-def embed_task(**ctx):           asyncio.run(EmbeddingClusterer().run())
-def analyze_task(**ctx):         asyncio.run(NewsAnalysisAgent().run())   # L2 LangGraph 슈퍼바이저
+async def _news(schedule):                       # AsyncSession은 Task별 독립 세션
+    async with AsyncSessionLocal() as db:
+        await NewsCollector().run(db, schedule)
+
+async def _embed():
+    async with AsyncSessionLocal() as db:
+        await EmbeddingClusterer().run(db)
 
 with DAG(
     dag_id="jangdokdae_pipeline",
-    schedule="0 9 * * 1-5",       # 09:00 — 15:30 run은 동일 DAG의 두 번째 스케줄(타임테이블)로 추가
+    schedule="0 9 * * 1-5",       # 15:30 run은 동일 DAG의 두 번째 스케줄로 추가
     start_date=datetime(2026, 1, 1),
-    catchup=False,
+    catchup=False,                 # 뉴스는 과거 소급 무의미(24h 창)
     default_args={"retries": 2, "retry_delay": 60},
 ) as dag:
-
-    t_news    = PythonOperator(task_id="collect_news",    python_callable=collect_news_task)
-    t_company = PythonOperator(task_id="collect_company", python_callable=collect_company_task)
-    t_prep    = PythonOperator(task_id="preprocess",      python_callable=preprocess_task)
-    t_embed   = PythonOperator(task_id="embed_cluster",   python_callable=embed_task)
-    t_analyze = PythonOperator(task_id="analyze",         python_callable=analyze_task)
-
-    # 수집 병렬 → 전처리 → 임베딩 → 분석 (1 run = 전체 완주)
-    [t_news, t_company] >> t_prep >> t_embed >> t_analyze
+    t_news    = PythonOperator(task_id="collect_news",
+                               python_callable=lambda: asyncio.run(_news("morning")))
+    t_company = PythonOperator(task_id="collect_company",
+                               python_callable=lambda: asyncio.run(CompanyCollector().run("morning")))
+    t_embed   = PythonOperator(task_id="embed_cluster",
+                               python_callable=lambda: asyncio.run(_embed()))
+    # TODO: analyze Task — NewsAnalysisAgent(06, L2) 구현 후 t_embed >> t_analyze 추가
+    [t_news, t_company] >> t_embed
 ```
 
 ## 9. 파이프라인 러너 (하이브리드 로컬 실행)
 
-오케스트레이션(실행 순서·병렬·재시도·이력)은 **Airflow DAG가 전담**한다. 별도의 "마스터 오케스트레이터" 객체는 두지 않는다 — [8장](#8-dag-구현)처럼 DAG의 각 Task가 해당 단계를 직접 생성·호출하기 때문이다.
+운영 오케스트레이션은 Airflow DAG가 전담하되, **Airflow 없이 전체를 1회 완주하는 로컬·테스트 편의**(인프라 0)로 얇은 러너를 둔다 — `services/pipeline/runner.py`에 **구현 완료**(2026-06-11, 실완주 검증).
 
-> ⚠️ **MasterOrchestrator 제거 (2026-06-08)**: 과거 설계의 `MasterOrchestrator`는 단계 인스턴스를 모아 `run_collection`/`run_all` 등으로 묶는 헬퍼였다. 그러나 이는 Airflow DAG의 의존성·병렬·Task별 재시도와 **중복**되고("오케스트레이터가 둘"), `gather` 기반 병렬·에러 격리는 Airflow가 Task 단위로 더 잘 처리한다. 따라서 클래스는 삭제한다.
+- **로컬·테스트**: `python -m services.pipeline.runner [schedule]` → (수집 ∥) → 임베딩·클러스터링 1회 완주. 분석(06)은 TODO.
+- **운영**: Airflow DAG가 동일 단계를 스케줄·재시도·이력과 함께 실행([8장](#8-dag-구현)). 단계 간 데이터는 공유 DB 핸드오프라 러너든 DAG든 동작 동일.
 
-다만 **Airflow 없이 전체 파이프라인을 한 번에 돌리는 로컬·테스트 편의**(하이브리드, 인프라 0)를 위해 얇은 러너 함수 하나만 둔다.
-
-```python
-# services/pipeline/runner.py
-"""하이브리드 로컬 실행용 러너. 운영 오케스트레이션은 Airflow DAG가 담당."""
-import asyncio
-from services.pipeline.news_collector import NewsCollector
-from services.pipeline.company_collector import CompanyCollector
-from services.pipeline.preprocessor import Preprocessor
-from services.pipeline.embedding_clusterer import EmbeddingClusterer
-from services.pipeline.news_analysis_agent import NewsAnalysisAgent
-
-
-async def run_pipeline(schedule: str = "scheduled") -> None:
-    """수집(병렬) → 전처리 → 임베딩 → 분석. 1회 호출 = 전체 파이프라인 완주."""
-    await asyncio.gather(
-        NewsCollector().run(schedule),
-        CompanyCollector().run(schedule),
-    )
-    await Preprocessor().run()
-    await EmbeddingClusterer().run()
-    await NewsAnalysisAgent().run()        # L2 슈퍼바이저-워커
-
-
-if __name__ == "__main__":
-    asyncio.run(run_pipeline())            # python -m services.pipeline.runner
-```
-
-- **로컬·테스트**: `python -m services.pipeline.runner` → 전체 1회 완주 (인프라 0)
-- **운영**: Airflow DAG가 동일 단계들을 스케줄·재시도·이력과 함께 실행([8장](#8-dag-구현))
-- 단계 간 데이터는 공유 DB 상태 핸드오프 → 러너든 DAG든 동작은 동일
-
-> 단계(파이프라인) 수준·도구 수준의 에러 처리 전략은 [01 문서 6장 에러 처리](./01-pipeline-orchestration-design.md#6-에러-처리)를 참조한다.
+> ⚠️ **MasterOrchestrator 제거 (2026-06-08)**: 과거의 단계 묶음 헬퍼는 Airflow DAG의 의존성·병렬·재시도와 중복("오케스트레이터가 둘")이라 삭제했다. 에러 처리 전략은 [01 §6](./01-pipeline-orchestration-design.md#6-에러-처리).
 
 ## 10. Airflow를 선택한 이유 (vs APScheduler)
 
