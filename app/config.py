@@ -21,6 +21,15 @@ class Settings(BaseSettings):
     embed_model: str = "jhgan/ko-sroberta-multitask"  # baseline (.env: EMBED_MODEL)
     embed_dim: int = 768  # 임베딩 차원 (.env: EMBED_DIM) — 모델에 따라 768 또는 1024
     embed_batch_size: int = 50  # Vertex AI 최대 허용 배치 크기 (설계 05 §2.3)
+    # 클러스터링·중복·이슈 선정 파라미터 — 매직넘버 대신 환경 변수로 빼 실데이터 교정 시
+    # 코드 수정 없이 조정한다(설계 05 §5.6·§5.8·§6.2, 미결 §11). 현재값은 휴리스틱 초기값.
+    cluster_min_cluster_size: int = 2  # HDBSCAN min_cluster_size (.env: CLUSTER_MIN_CLUSTER_SIZE)
+    cluster_min_samples: int = 1  # HDBSCAN min_samples — noise 최소·싱글톤 보존(§5.4)
+    dedup_similarity_threshold: float = 0.95  # 근접 중복 soft flag 임계값(§4.2)
+    top_issue_count: int = 10  # 분석 파이프라인에 넘길 최대 이슈 수(§6.2)
+    # "당일 수집분" 처리 창(시간) — dedup·클러스터링이 같은 창을 공유해야 단계 간 일관성이
+    # 유지되므로(05 §4.2·§6) 호출부마다 계산하지 않고 여기를 단일 출처로 둔다.
+    pipeline_window_hours: int = 24
     # Google Cloud / Vertex AI — gemini 계열 임베딩(관리형) 분기 + LLM 분석에서 사용.
     # 프로젝트가 없으면 Vertex 호출 불가. HuggingFace 분기(KURE·ko-sroberta)는 비어 있어도 동작한다.
     # 서비스 계정 키 경로 (.env: GOOGLE_APPLICATION_CREDENTIALS)
