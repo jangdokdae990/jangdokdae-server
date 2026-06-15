@@ -1,0 +1,104 @@
+# 장독대 Airflow — LocalExecutor docker-compose (설계 00 §12.3)
+#
+# 공식 Airflow 3.x compose를 단순화했다: Celery용 redis·worker·flower 제거 → LocalExecutor.
+# ⚠️ 여기 postgres는 Airflow metadata DB(run·task 이력)다. 장독대 데이터 DB(Neon)와 별개이며,
+#    장독대 런타임 비밀(Neon DATABASE_URL·Vertex·API 키)은 .env로 주입한다(§12.3).
+#
+# 사용:
+#   docker compose build
+#   docker compose up      # → http://localhost:8080
+---
+x-airflow-common: &airflow-common
+  build:
+    context: .
+    dockerfile: Dockerfile
+  environment: &airflow-common-env
+    AIRFLOW__CORE__EXECUTOR: LocalExecutor
+    AIRFLOW__CORE__DAGS_FOLDER: /opt/jangdokdae/dags
+    AIRFLOW__CORE__LOAD_EXAMPLES: "false"
+    AIRFLOW__CORE__DEFAULT_TIMEZONE: Asia/Seoul
+    AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@postgres/airflow
+    # 단계 코드 import 경로 + Vertex 인증(컨테이너 절대경로로 .env의 상대경로 override)
+    PYTHONPATH: /opt/jangdokdae
+    GOOGLE_APPLICATION_CREDENTIALS: /opt/jangdokdae/app/credentials/vertex_key.json
+    TZ: Asia/Seoul
+  env_file:
+    - .env
+  volumes:
+    - ./dags:/opt/jangdokdae/dags
+    - ./app:/opt/jangdokdae/app          # app/credentials/vertex_key.json 포함
+    - ./services:/opt/jangdokdae/services
+    - ./utils:/opt/jangdokdae/utils
+    - ./prompts:/opt/jangdokdae/prompts
+    - ./logs:/opt/airflow/logs           # 실행 로그 영속화
+  # user 미지정 → 이미지 기본 사용자(airflow, uid 50000)로 실행. 호스트 uid를 강제하면
+  # 컨테이너 /etc/passwd에 그 uid가 없어 Airflow getuser()가 실패한다(logs는 권한 개방).
+  depends_on: &airflow-common-depends-on
+    postgres:
+      condition: service_healthy
+
+services:
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: airflow
+      POSTGRES_PASSWORD: airflow
+      POSTGRES_DB: airflow
+    volumes:
+      - airflow-db-volume:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "airflow"]
+      interval: 10s
+      retries: 5
+      start_period: 5s
+    restart: always
+
+  # DB 마이그레이션 1회 (다른 서비스의 선행 조건)
+  airflow-init:
+    <<: *airflow-common
+    entrypoint: /bin/bash
+    command:
+      - -c
+      - airflow db migrate
+    restart: on-failure
+
+  airflow-apiserver:
+    <<: *airflow-common
+    # SimpleAuthManager는 비번을 env가 아닌 JSON 파일에서만 읽는다. 그래서 .env의
+    # AIRFLOW_ADMIN_PASSWORD로 기동 시 비번 파일을 생성한 뒤 정규 entrypoint로 넘긴다(§12.3).
+    # $$는 compose 보간이 아닌 컨테이너 런타임 확장(env_file 주입값 사용 → yaml/로그에 평문 미노출).
+    entrypoint: /bin/bash
+    command:
+      - -c
+      - |
+        echo "{\"admin\": \"$${AIRFLOW_ADMIN_PASSWORD:?set AIRFLOW_ADMIN_PASSWORD in .env}\"}" \
+          > /opt/airflow/simple_auth_manager_passwords.json.generated
+        exec /entrypoint api-server
+    ports:
+      - "8080:8080"
+    restart: always
+    depends_on:
+      <<: *airflow-common-depends-on
+      airflow-init:
+        condition: service_completed_successfully
+
+  airflow-scheduler:
+    <<: *airflow-common
+    command: scheduler
+    restart: always
+    depends_on:
+      <<: *airflow-common-depends-on
+      airflow-init:
+        condition: service_completed_successfully
+
+  airflow-dag-processor:
+    <<: *airflow-common
+    command: dag-processor
+    restart: always
+    depends_on:
+      <<: *airflow-common-depends-on
+      airflow-init:
+        condition: service_completed_successfully
+
+volumes:
+  airflow-db-volume:
