@@ -25,6 +25,7 @@ from app.db.orm_models.disclosure import Disclosure
 from app.db.orm_models.financial_statement import FinancialStatement
 from app.db.orm_models.market_indicator import MarketIndicator
 from app.db.orm_models.news import News
+from app.db.orm_models.news_cluster import NewsCluster
 from app.db.orm_models.report_chunk import ReportChunk
 from app.db.orm_models.stock_price import StockPrice
 
@@ -45,22 +46,35 @@ def _chunks(records: list[dict], max_params: int | None = None) -> Iterator[list
 
 
 async def _upsert(
-    db: AsyncSession, model: type[Base], records: list[dict], index_elements: list[str]
+    db: AsyncSession,
+    model: type[Base],
+    records: list[dict],
+    index_elements: list[str],
+    update_columns: list[str] | None = None,
 ) -> int:
-    """records를 UPSERT(충돌 무시)하고 새로 삽입된 건수를 반환. 빈 입력은 0.
+    """records를 UPSERT하고 반영(삽입+갱신) 건수를 반환. 빈 입력은 0.
 
+    충돌 시 기본은 무시(DO NOTHING)다. update_columns를 주면 해당 컬럼만 새 값으로
+    갱신(DO UPDATE)한다 — 같은 키의 산출물이 실행마다 갱신되는 테이블(news_cluster)용.
     대량 입력은 파라미터 한계를 넘지 않도록 청크로 나눠 실행하되, 전체를 1회 commit해
     배치 원자성을 유지한다(중간 청크 실패 시 모두 롤백).
     """
     if not records:
         return 0
-    inserted = 0
+    affected = 0
     for chunk in _chunks(records):
-        stmt = pg_insert(model).values(chunk).on_conflict_do_nothing(index_elements=index_elements)
+        stmt = pg_insert(model).values(chunk)
+        if update_columns:
+            stmt = stmt.on_conflict_do_update(
+                index_elements=index_elements,
+                set_={col: stmt.excluded[col] for col in update_columns},
+            )
+        else:
+            stmt = stmt.on_conflict_do_nothing(index_elements=index_elements)
         result = await db.execute(stmt)
-        inserted += result.rowcount  # type: ignore[attr-defined]
+        affected += result.rowcount  # type: ignore[attr-defined]
     await db.commit()
-    return inserted
+    return affected
 
 
 async def upsert_news(db: AsyncSession, records: list[dict]) -> int:
@@ -92,3 +106,19 @@ async def upsert_report_chunks(db: AsyncSession, records: list[dict]) -> int:
     """사업보고서 청크를 (corp_code, report_year, chunk_type, subsection) 기준 UPSERT."""
     keys = ["corp_code", "report_year", "chunk_type", "subsection"]
     return await _upsert(db, ReportChunk, records, keys)
+
+
+async def upsert_news_clusters(db: AsyncSession, records: list[dict]) -> int:
+    """클러스터를 (run_date, representative_news_id) 기준 UPSERT — 충돌 시 내용 갱신.
+
+    같은 날 2회 실행(09:00·15:30, 설계 00)에서 오후 런은 같은 대표 기사의 클러스터가
+    새 기사로 커질 수 있다 — DO NOTHING이면 아침의 낡은 행이 남으므로 소속·크기·중요도를
+    새 값으로 갱신한다. 같은 입력 재실행은 같은 값을 다시 쓰므로 여전히 멱등하다(01 §2).
+    """
+    return await _upsert(
+        db,
+        NewsCluster,
+        records,
+        ["run_date", "representative_news_id"],
+        update_columns=["member_news_ids", "size", "importance"],
+    )

@@ -11,8 +11,9 @@
 
 본문 fetch:
     분석 단계 도구 fetch_article_body(trafilatura)를 재사용하되, **리다이렉트 추적
-    클라이언트를 주입**한다 — 프로덕션 fetcher는 follow_redirects를 켜지 않아 국내 다수
-    매체의 http→https 301에서 실패한다(실험 중 확인). 페이월·WAF(investing.com 403)는
+    클라이언트를 주입**한다 — 이 실험 당시 프로덕션 fetcher가 follow_redirects를 켜지 않아
+    국내 다수 매체의 http→https 301에서 실패함을 발견했고, 2026-06-11 프로덕션에도
+    follow_redirects가 적용됐다(article_fetcher.py). 페이월·WAF(investing.com 403)는
     그대로 실패 → 본문 없는 기사는 공정 비교를 위해 표본에서 제외한다.
     본문·snippet은 저장하지 않는다(저작권, 설계 02 §3) — 인메모리 임베딩 후 폐기.
 

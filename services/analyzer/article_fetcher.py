@@ -47,7 +47,11 @@ async def fetch_article_body(
     """
     owns_client = client is None
     if client is None:
-        client = httpx.AsyncClient(timeout=timeout, headers={"User-Agent": USER_AGENT})
+        # follow_redirects 필수 — 국내 다수 매체가 http→https 301을 반환해, 추적하지 않으면
+        # raise_for_status가 3xx에서 실패한다(실험2에서 확인: 추적 시 fetch 성공률 92%).
+        client = httpx.AsyncClient(
+            timeout=timeout, headers={"User-Agent": USER_AGENT}, follow_redirects=True
+        )
     try:
         html = await _download(client, url)
     except httpx.HTTPError as exc:
@@ -70,7 +74,10 @@ async def fetch_first_available(
 ) -> str | None:
     """후보 URL을 중심 근접순대로 시도해 첫 성공 본문을 반환. 전부 실패 시 None."""
     headers = {"User-Agent": USER_AGENT}
-    async with httpx.AsyncClient(timeout=timeout, headers=headers) as client:
+    # follow_redirects — fetch_article_body의 1회용 클라이언트와 같은 이유(http→https 301).
+    async with httpx.AsyncClient(
+        timeout=timeout, headers=headers, follow_redirects=True
+    ) as client:
         for url in urls:
             body = await fetch_article_body(url, client=client)
             if body is not None:

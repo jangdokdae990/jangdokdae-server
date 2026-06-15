@@ -79,6 +79,7 @@ app/
 **`app/llm/`** — LangChain과 LangGraph 기반 LLM 파이프라인입니다. `services/analyzer/`가 이 모듈의 래퍼 역할을 합니다.
 
 **워크플로우:**
+
 ```
 입력 (뉴스 제목 + 본문)
     ↓
@@ -122,7 +123,6 @@ services/
     └── google_oauth.py         # GoogleOAuthHandler
 ```
 
-
 ---
 
 ### `tasks/`
@@ -152,6 +152,7 @@ prompts/
 ```
 
 **YAML 구조:**
+
 ```yaml
 name: "prompt_name"
 version: "1.0.0"

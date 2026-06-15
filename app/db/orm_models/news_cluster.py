@@ -8,7 +8,7 @@ importance 내림차순으로 읽어 상위 이슈를 인계받는다. embedding
 
 from datetime import date, datetime
 
-from sqlalchemy import ARRAY, Date, DateTime, Float, ForeignKey, Integer
+from sqlalchemy import ARRAY, Date, DateTime, Float, ForeignKey, Integer, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import KST_NOW, Base
@@ -16,6 +16,11 @@ from app.db.base import KST_NOW, Base
 
 class NewsCluster(Base):
     __tablename__ = "news_cluster"
+    __table_args__ = (
+        # 같은 실행 일자에 같은 대표 기사를 가진 클러스터는 1행만 — 재실행(재시도) 시
+        # ON CONFLICT DO NOTHING으로 중복 적재를 막는 멱등 키(설계 01 §2 재실행 멱등 계약).
+        UniqueConstraint("run_date", "representative_news_id", name="uq_news_cluster_run_rep"),
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     run_date: Mapped[date] = mapped_column(Date, nullable=False)  # 클러스터링 실행 일자

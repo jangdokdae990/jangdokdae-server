@@ -1,0 +1,25 @@
+# 빌드 컨텍스트 제외 (설계 00 §11·§12.3)
+# 비밀(.env·credentials)은 이미지에 굽지 않고 런타임에 env_file·볼륨으로 주입한다.
+.env
+.env.*
+app/credentials/
+
+# 가상환경·캐시
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+*.egg-info/
+
+# VCS·산출물·로그
+.git/
+.gitignore
+output/
+logs/
+
+# 이미지에 불필요
+tests/
+docs/
+migrations/

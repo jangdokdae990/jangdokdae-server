@@ -77,9 +77,9 @@ uvicorn app.main:app --reload
 python -m app.main
 ```
 
-앱이 실행되면: http://localhost:8000
+앱이 실행되면: <http://localhost:8000>
 
-API 문서: http://localhost:8000/docs (Swagger)
+API 문서: <http://localhost:8000/docs> (Swagger)
 
 ### 4. 테스트 실행
 
@@ -94,16 +94,19 @@ pytest --cov=app
 ## API 엔드포인트
 
 ### 인증 (Auth)
+
 - `POST /api/v1/auth/login` - 로그인
 - `POST /api/v1/auth/logout` - 로그아웃
 - `POST /api/v1/auth/refresh` - 토큰 갱신
 
 ### 사용자 (Users)
+
 - `POST /api/v1/users/register` - 회원가입
 - `GET /api/v1/users/me` - 현재 사용자 조회
 - `PUT /api/v1/users/me` - 사용자 정보 업데이트
 
 ### 뉴스 (News)
+
 - `GET /api/v1/news/today` - 오늘의 주요 뉴스
 - `GET /api/v1/news/interests` - 관심 종목 뉴스
 - `GET /api/v1/news/{news_id}` - 뉴스 상세 조회
@@ -115,19 +118,23 @@ pytest --cov=app
 ### 뉴스 수집 (News Collection)
 
 #### 파이프라인 1: 주요 시장 뉴스
+
 - 국내: 연합뉴스, 한국경제 (RSS)
 - 국외: Reuters, AP (RSS)
 
 #### 파이프라인 2: 종목/섹터별 뉴스
+
 - 국내 종목: 네이버 뉴스 검색 API
 - 국외 종목: Finnhub API
 
 ### 전처리
+
 - URL 기반 중복 제거
 - 제목 유사도 기반 중복 제거
 - LLM 필터링 (영향도 판단)
 
 ### LLM 해설
+
 - 단순 요약이 아닌 맥락 있는 해설
 - 주린이 눈높이에 맞는 용어 풀이
 - 원문 출처 항상 노출
@@ -149,10 +156,12 @@ VERTEX_AI_PROJECT_ID=...
 ## 개발 가이드
 
 ### 코드 스타일
+
 - Black, Ruff, MyType 사용
 - 각 모듈은 단일 책임 원칙 준수
 
 ### 커밋 컨벤션
+
 ```
 feat: 새 기능
 fix: 버그 수정
@@ -163,6 +172,7 @@ chore: 빌드, 설정 변경
 ```
 
 ### 테스트
+
 - 주요 로직은 유닛 테스트 작성
 - 비동기 함수는 `pytest-asyncio` 사용
 
@@ -172,4 +182,4 @@ MIT
 
 ## 문의
 
-alsrud9259@gmail.com
+<alsrud9259@gmail.com>
