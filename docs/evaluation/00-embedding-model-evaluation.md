@@ -21,6 +21,7 @@
 | ③ RAG 검색 (실험3) | 질문에 맞는 문서를 찾나 | v2(0.966) > **gemini-001**(0.931) | recall@5 · MRR |
 
 **확정값:**
+
 ```bash
 EMBED_MODEL=gemini-embedding-001
 EMBED_DIM=768

@@ -168,6 +168,7 @@ SOM에서 출발해 SAM·TAM으로 넓히는 순서를 [`02-persona.md`](../02-p
 ### 6-3. 검증 연결
 
 이 추정은 **가설**이다. [`04-survey.md`](../04-survey.md)로 다음을 실측해 보정한다.
+
 - F1·F2 → ARPU·유료 전환율(SOM)
 - §6 조작적 정의 → 주린이 비중(SAM)
 - 예탁원 연령별 통계 → 2030 비중(SAM)
@@ -183,10 +184,10 @@ SOM에서 출발해 SAM·TAM으로 넓히는 순서를 [`02-persona.md`](../02-p
 
 ## 출처
 
-- 개인투자자 규모(1,410만): https://www.khan.co.kr/article/202503171138001
-- 2030 경력·금액·진입장벽(70%·54%·42%): https://www.sedaily.com/NewsVIew/22HE5EQEUY
-- 신규 투자자 60% 손실: https://www.kcmi.re.kr/report/report_view?report_no=1243
-- 20대 금융이해력 취약: https://www.bok.or.kr/portal/bbs/B0000502/view.do?menuNo=201265&nttId=10091152
-- 리포트 용어 장벽: https://www.businesspost.co.kr/BP?command=article_view&num=321306
-- 신규 진입자 고령화(50대+ 비중): https://marketin.edaily.co.kr/News/ReadE?newsId=01810566642336856
-- TAM/SAM/SOM 개념(멘토 참고): https://goodsharp.tistory.com/617
+- 개인투자자 규모(1,410만): <https://www.khan.co.kr/article/202503171138001>
+- 2030 경력·금액·진입장벽(70%·54%·42%): <https://www.sedaily.com/NewsVIew/22HE5EQEUY>
+- 신규 투자자 60% 손실: <https://www.kcmi.re.kr/report/report_view?report_no=1243>
+- 20대 금융이해력 취약: <https://www.bok.or.kr/portal/bbs/B0000502/view.do?menuNo=201265&nttId=10091152>
+- 리포트 용어 장벽: <https://www.businesspost.co.kr/BP?command=article_view&num=321306>
+- 신규 진입자 고령화(50대+ 비중): <https://marketin.edaily.co.kr/News/ReadE?newsId=01810566642336856>
+- TAM/SAM/SOM 개념(멘토 참고): <https://goodsharp.tistory.com/617>

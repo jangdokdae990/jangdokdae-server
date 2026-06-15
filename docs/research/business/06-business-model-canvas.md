@@ -7,7 +7,6 @@
 > 프레임 참고: [IdeaScale — 비즈니스 모델 캔버스 정의](https://ideascale.com/ko/%EB%B8%94%EB%A1%9C%EA%B7%B8/%EB%B9%84%EC%A6%88%EB%8B%88%EC%8A%A4-%EB%AA%A8%EB%8D%B8-%EC%BA%94%EB%B2%84%EC%8A%A4-%EC%A0%95%EC%9D%98/)
 > ⚠️ 모든 항목은 **데스크 리서치 + N=56 최종 설문 실측 기반의 가설**이다. 검증된 수치엔 출처를, 가정·해석엔 **[가정]·[추론]**을 단다. 작성 순서: ① 고객 세그먼트 → ② 가치 제안 → 나머지.
 
-
 ## 0. 한눈에 보는 캔버스
 
 | ⑧ 핵심 파트너 | ⑦ 핵심 활동 | ② 가치 제안 | ④ 고객 관계 | ① 고객 세그먼트 |
@@ -316,7 +315,7 @@
 
 ## 출처
 
-- 프레임 정의: https://ideascale.com/ko/%EB%B8%94%EB%A1%9C%EA%B7%B8/%EB%B9%84%EC%A6%88%EB%8B%88%EC%8A%A4-%EB%AA%A8%EB%8D%B8-%EC%BA%94%EB%B2%84%EC%8A%A4-%EC%A0%95%EC%9D%98/
+- 프레임 정의: <https://ideascale.com/ko/%EB%B8%94%EB%A1%9C%EA%B7%B8/%EB%B9%84%EC%A6%88%EB%8B%88%EC%8A%A4-%EB%AA%A8%EB%8D%B8-%EC%BA%94%EB%B2%84%EC%8A%A4-%EC%A0%95%EC%9D%98/>
 - 고객·니즈·정보원: [`02-persona.md`](../02-persona.md), [`04-survey.md`](../04-survey.md) §9
 - 경쟁·가치·수익모델: [`01-benchmarking.md`](../01-benchmarking.md)
 - 채널·관계(저니): [`03-user-journey.md`](../03-user-journey.md)

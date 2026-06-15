@@ -107,10 +107,12 @@
 ## 6. 장독대를 위한 종합 시사점
 
 ### 벤치마크할 것 (검증된 강점)
+
 1. **어피티의 톤·번역 메커니즘**: 무시 안 하는 말투 → 감정 장벽 제거 / 질문형 용어풀이("X가 뭐야?") / 문화 기반 비유 / 정보 압축 큐레이션 / "공감 우선" 콘텐츠 원칙.
 2. **토스의 온보딩**: 소액·직관 UX로 "쇼핑 수준" 진입, 공시 자동 해석·푸시.
 
 ### 빈틈(차별화 기회) — 경쟁사가 못 하는 5가지
+
 | # | 빈틈 | 누가 못 채우나 |
 |---|---|---|
 | 1 | **개인화 큐레이션** (관심 종목·포트폴리오 맞춤) | 어피티(일괄 발송), 핀트(블랙박스) |
@@ -120,6 +122,7 @@
 | 5 | **독해력이 남는 구조** (학습 자산화) | 핀트(대행이라 안 남음) |
 
 ### 한 줄 포지셔닝 가설
+>
 > **"핀트가 떠먹여준다면, 장독대는 읽는 법을 가르쳐 스스로 판단하게 한다 — 어피티의 친절함으로 번역하되, 주식에 특화해 개인화·심화한다."**
 
 → 이 포지셔닝을 [`02-persona.md`](02-persona.md)에서 구체 페르소나로, [`05-market-size.md`](business/05-market-size.md)에서 시장 규모로 검증한다.
@@ -136,32 +139,36 @@
 ## 출처
 
 **토스증권**
-- 타깃 선언: https://www.seoulfn.com/news/articleView.html?idxno=409700 · https://www.infostockdaily.co.kr/news/articleView.html?idxno=125734
-- 경력 1년 미만 70% 조사: https://paxnetnews.com/articles/70187
-- 2030 비율: https://magazine.hankyung.com/business/article/202106027809b
-- 2024 실적·MAU·가입자: https://www.businesskorea.co.kr/news/articleView.html?idxno=235442
-- 제품·페르소나·단순화 비판: https://namu.wiki/w/%ED%86%A0%EC%8A%A4%EC%A6%9D%EA%B6%8C · https://www.kbanker.co.kr/news/articleView.html?idxno=217438
-- HTS→WTS 전환: https://www.businesspost.co.kr/BP?command=article_view&num=361100
-- 옵션 논란·연기: https://www.mt.co.kr/stock/2025/12/11/2025121115491996472
+
+- 타깃 선언: <https://www.seoulfn.com/news/articleView.html?idxno=409700> · <https://www.infostockdaily.co.kr/news/articleView.html?idxno=125734>
+- 경력 1년 미만 70% 조사: <https://paxnetnews.com/articles/70187>
+- 2030 비율: <https://magazine.hankyung.com/business/article/202106027809b>
+- 2024 실적·MAU·가입자: <https://www.businesskorea.co.kr/news/articleView.html?idxno=235442>
+- 제품·페르소나·단순화 비판: <https://namu.wiki/w/%ED%86%A0%EC%8A%A4%EC%A6%9D%EA%B6%8C> · <https://www.kbanker.co.kr/news/articleView.html?idxno=217438>
+- HTS→WTS 전환: <https://www.businesspost.co.kr/BP?command=article_view&num=361100>
+- 옵션 논란·연기: <https://www.mt.co.kr/stock/2025/12/11/2025121115491996472>
 
 **어피티(UPPITY)**
-- 홈페이지·회사소개: https://uppity.co.kr/ · https://uppity.co.kr/company/
-- 타깃·페르소나 인터뷰: https://www.ilyo.co.kr/?ac=article_view&entry_id=329478 · https://blog.stibee.com/bonaensaram-eopiti-meonireteoro-geumyung-galjeungeul-haesohada/
-- 브랜드 철학: https://chunchu.yonsei.ac.kr/news/articleView.html?idxno=29664
-- 편집 원칙(온보딩 가이드): https://uppity.campaignus.me/notice/?bmode=view&idx=12106700
-- 광고 단가: https://www.ads-soon.com/product/details/425
+
+- 홈페이지·회사소개: <https://uppity.co.kr/> · <https://uppity.co.kr/company/>
+- 타깃·페르소나 인터뷰: <https://www.ilyo.co.kr/?ac=article_view&entry_id=329478> · <https://blog.stibee.com/bonaensaram-eopiti-meonireteoro-geumyung-galjeungeul-haesohada/>
+- 브랜드 철학: <https://chunchu.yonsei.ac.kr/news/articleView.html?idxno=29664>
+- 편집 원칙(온보딩 가이드): <https://uppity.campaignus.me/notice/?bmode=view&idx=12106700>
+- 광고 단가: <https://www.ads-soon.com/product/details/425>
 
 **핀트(Fint)**
-- 타깃·연령·최소금액: https://www.fintechtimes.co.kr/news/article.html?no=32615
-- 페르소나·핀트로그: https://economist.co.kr/2022/09/01/finance/Financial/20220901162055149.html
-- 회원·AUM·점유율: https://sports.khan.co.kr/article/202605010428003
-- 수수료·적자·운용: https://www.topdaily.kr/articles/91291 · https://namu.wiki/w/Fint
-- 제품 분석: https://brunch.co.kr/@bestversionofh/3
+
+- 타깃·연령·최소금액: <https://www.fintechtimes.co.kr/news/article.html?no=32615>
+- 페르소나·핀트로그: <https://economist.co.kr/2022/09/01/finance/Financial/20220901162055149.html>
+- 회원·AUM·점유율: <https://sports.khan.co.kr/article/202605010428003>
+- 수수료·적자·운용: <https://www.topdaily.kr/articles/91291> · <https://namu.wiki/w/Fint>
+- 제품 분석: <https://brunch.co.kr/@bestversionofh/3>
 
 **로빈후드**
-- S-1(첫 투자자·신규계좌 50%): https://www.sec.gov/Archives/edgar/data/1783879/000162828021013318/robinhoods-1.htm
-- 미션: https://robinhood.com/us/en/newsroom/robinhood-raises-323m-to-democratize-finance-for-all/
-- 실적·계좌·MAU: https://investors.robinhood.com/news-releases/news-release-details/robinhood-reports-fourth-quarter-and-full-year-2025-results
-- 통계 종합: https://www.businessofapps.com/data/robinhood-statistics/
-- 게임화 합의: https://www.bostonglobe.com/2024/01/18/business/robinhood-agrees-pay-75-million-settle-complaints-over-its-sales-practices/
-- Alex Kearns: https://www.cbsnews.com/news/alex-kearns-robinhood-trader-suicide-wrongful-death-suit/ · https://www.cnbc.com/2021/02/08/robinhood-sued-by-family-of-alex-kearns-20-year-old-trader-who-killed-himself-.html
+
+- S-1(첫 투자자·신규계좌 50%): <https://www.sec.gov/Archives/edgar/data/1783879/000162828021013318/robinhoods-1.htm>
+- 미션: <https://robinhood.com/us/en/newsroom/robinhood-raises-323m-to-democratize-finance-for-all/>
+- 실적·계좌·MAU: <https://investors.robinhood.com/news-releases/news-release-details/robinhood-reports-fourth-quarter-and-full-year-2025-results>
+- 통계 종합: <https://www.businessofapps.com/data/robinhood-statistics/>
+- 게임화 합의: <https://www.bostonglobe.com/2024/01/18/business/robinhood-agrees-pay-75-million-settle-complaints-over-its-sales-practices/>
+- Alex Kearns: <https://www.cbsnews.com/news/alex-kearns-robinhood-trader-suicide-wrongful-death-suit/> · <https://www.cnbc.com/2021/02/08/robinhood-sued-by-family-of-alex-kearns-20-year-old-trader-who-killed-himself-.html>

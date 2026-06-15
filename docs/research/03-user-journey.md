@@ -213,6 +213,7 @@
 ## 8. 검증 계획
 
 저니 맵은 페르소나 가설 기반. [`04-survey.md`](04-survey.md) 및 사용성 테스트로 검증한다.
+
 - 각 페르소나의 최저점이 실제 이탈 지점인지(퍼널 실측)
 - ③ 어떤 형태 해설이 "이해된다"를 주는지(프로토타입 A/B)
 - 이코린의 ④ 마찰이 실제로 이탈로 이어지는지
@@ -221,8 +222,8 @@
 
 ## 출처
 
-- 리딩방 사기 피해: https://www.nongmin.com/article/20251027500338
-- 미진입 54% "방법 몰라서": https://www.sedaily.com/NewsVIew/22HE5EQEUY
-- 신규 투자자 60% 손실: https://www.kcmi.re.kr/report/report_view?report_no=1243
-- 20대 중단율·재투자 의향 역설: https://www.trendmonitor.co.kr/tmweb/trend/allTrend/detail.do?bIdx=2679&code=0601&trendType=CKOREA
-- 책·강의 이탈(학습 어려움): https://fastcampus.co.kr/story_article_investtop4
+- 리딩방 사기 피해: <https://www.nongmin.com/article/20251027500338>
+- 미진입 54% "방법 몰라서": <https://www.sedaily.com/NewsVIew/22HE5EQEUY>
+- 신규 투자자 60% 손실: <https://www.kcmi.re.kr/report/report_view?report_no=1243>
+- 20대 중단율·재투자 의향 역설: <https://www.trendmonitor.co.kr/tmweb/trend/allTrend/detail.do?bIdx=2679&code=0601&trendType=CKOREA>
+- 책·강의 이탈(학습 어려움): <https://fastcampus.co.kr/story_article_investtop4>

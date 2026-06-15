@@ -9,6 +9,7 @@
 ## 0. 목적과 읽는 법
 
 멘토는 두 가지를 동시에 요구했다.
+
 1. **내러티브(§2-2):** 기술·기능이 아니라 *"왜 필요한가"의 배경 스토리*가 설득의 핵심.
 2. **AI 대체 가치(§2-3):** "AI가 사람의 단순반복 노동을 비용효율적으로 대체한다"를 **수치로** 증명하되, **"원래 수요가 많던 것"**에서 출발할 것. (멘토 경고: *애널리스트 리포트는 원래 찾는 사람이 적었다 → 호응 부족*)
 
@@ -164,9 +165,9 @@
 
 ## 출처
 
-- 개인투자자 1,410만: https://www.khan.co.kr/article/202503171138001
-- 2030 경력 1년 미만 70%·미진입 54%: https://www.sedaily.com/NewsVIew/22HE5EQEUY
-- 신규 60% 손실: https://www.kcmi.re.kr/report/report_view?report_no=1243
-- 리딩방 사기 1.3조원: https://www.nongmin.com/article/20251027500338
-- 리포트 용어 장벽: https://www.businesspost.co.kr/BP?command=article_view&num=321306
+- 개인투자자 1,410만: <https://www.khan.co.kr/article/202503171138001>
+- 2030 경력 1년 미만 70%·미진입 54%: <https://www.sedaily.com/NewsVIew/22HE5EQEUY>
+- 신규 60% 손실: <https://www.kcmi.re.kr/report/report_view?report_no=1243>
+- 리딩방 사기 1.3조원: <https://www.nongmin.com/article/20251027500338>
+- 리포트 용어 장벽: <https://www.businesspost.co.kr/BP?command=article_view&num=321306>
 - 멘토링 피드백(AI 대체·내러티브): [../../mentoring/2026-06-02-feedback.md](../../mentoring/2026-06-02-feedback.md)
