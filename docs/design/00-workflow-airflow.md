@@ -26,9 +26,11 @@
 ## 목차
 
 **[기초]**
+
 - [0. Airflow 기초 — 무엇이고, 왜 필요하고, 어떻게 생겼는가](#0-airflow-기초--무엇이고-왜-필요하고-어떻게-생겼는가)
 
 **[기획]**
+
 - [1. 왜 Airflow인가](#1-왜-airflow인가)
 - [2. 경계 기준 — 흐름 제어(Flow Control)](#2-경계-기준--흐름-제어flow-control)
 - [3. 두 도구의 강점과 한계](#3-두-도구의-강점과-한계)
@@ -36,24 +38,28 @@
 - [5. 경계 케이스 해설](#5-경계-케이스-해설)
 
 **[설계]**
+
 - [6. 전체 구조](#6-전체-구조)
 - [7. DAG 구성](#7-dag-구성)
 - [8. DAG 구현](#8-dag-구현)
 - [9. 파이프라인 러너 (하이브리드 로컬 실행)](#9-파이프라인-러너-하이브리드-로컬-실행)
 - [10. Airflow를 선택한 이유 (vs APScheduler)](#10-airflow를-선택한-이유-vs-apscheduler)
 - [11. 디렉토리 구조](#11-디렉토리-구조)
+- [12. 배포·실행 환경](#12-배포실행-환경)
 
 ---
 
 # [기초]
 
 > **Airflow 자체에 대한 배경지식.** 장독대 설계 결정([기획]·[설계])을 읽기 전에 필요한 최소한의 Airflow 이해를 정리한다. 이미 Airflow를 아는 독자는 [1장](#1-왜-airflow인가)으로 건너뛰어도 된다.
+>
+> 📘 이 §0은 **설계 진입용 압축 요약**이다. 개념·설치·배포를 처음부터 풀어 익히려면 → [Airflow 핵심 개념 가이드](../guide/00-airflow-essentials.md).
 
 ## 0. Airflow 기초 — 무엇이고, 왜 필요하고, 어떻게 생겼는가
 
 ### 0.1 Airflow란
 
-**Apache Airflow는 워크플로우를 파이썬 코드로 정의하고, 스케줄에 따라 실행하고, 상태를 모니터링하는 오픈소스 오케스트레이션 플랫폼**이다. 
+**Apache Airflow는 워크플로우를 파이썬 코드로 정의하고, 스케줄에 따라 실행하고, 상태를 모니터링하는 오픈소스 오케스트레이션 플랫폼**이다.
 
 핵심 철학은 **"Workflow as Code"** — 워크플로우를 GUI나 XML이 아니라 **파이썬 코드(DAG 파일)로 선언**한다. 그래서 버전 관리(git)·코드 리뷰·테스트가 일반 코드와 동일하게 적용되고, 동적 생성(반복문으로 Task 생성)도 가능하다.
 
@@ -136,6 +142,7 @@ Airflow가 실무에서 쓰이는 대표 패턴과 공개된 사례들이다. **
 장독대 기준으로 보면: 우리는 "외부 API 주기 수집 + ETL" 패턴의 소형 사례이고, `analyze` Task 내부에 LLM 에이전트(L2)가 들어가는 점이 최근 추세(Airflow 위에 AI 워크로드)와 정확히 겹친다.
 
 **참고 자료**
+
 - [Airflow Architecture Overview (공식, 3.x)](https://airflow.apache.org/docs/apache-airflow/stable/core-concepts/overview.html)
 - [Airflow Components (Astronomer)](https://www.astronomer.io/docs/learn/airflow-components)
 - [State of Airflow 2025 (Astronomer — 채택 규모·ML 워크로드 통계)](https://www.astronomer.io/blog/state-of-airflow-2025-unleashing-the-future-of-data-orchestration/)
@@ -266,15 +273,21 @@ collect_news ∥ collect_company → preprocess → embed_cluster → analyze
 ## 8. DAG 구현
 
 ```python
-# dags/jangdokdae_pipeline.py — 골격 (분석 06 구현 전까지 3-Task로 운영)
+# dags/jangdokdae_pipeline.py — 개념 골격 (3-Task; 실제 구현은 venv 격리로
+#   ExternalPythonOperator 사용 → §12.3. 아래는 흐름을 보이는 단순화 버전이다.)
 import asyncio
-from datetime import datetime
-from airflow import DAG
-from airflow.operators.python import PythonOperator
+import pendulum
+from airflow.sdk import DAG                                    # 3.x Task SDK 경로
+from airflow.providers.standard.operators.python import PythonOperator
+from airflow.timetables.trigger import MultipleCronTriggerTimetable
 from app.db.base import AsyncSessionLocal
 from services.pipeline.news_collector import NewsCollector
 from services.pipeline.company_collector import CompanyCollector
 from services.pipeline.embedding_clusterer import EmbeddingClusterer
+
+def _schedule_for(context):                      # 09:00 run=morning, 15:30 run=afternoon
+    hour = context["logical_date"].in_timezone("Asia/Seoul").hour
+    return "morning" if hour < 12 else "afternoon"
 
 async def _news(schedule):                       # AsyncSession은 Task별 독립 세션
     async with AsyncSessionLocal() as db:
@@ -286,15 +299,19 @@ async def _embed():
 
 with DAG(
     dag_id="jangdokdae_pipeline",
-    schedule="0 9 * * 1-5",       # 15:30 run은 동일 DAG의 두 번째 스케줄로 추가
-    start_date=datetime(2026, 1, 1),
+    # 평일 09:00·15:30 KST 두 트리거. Airflow 3.x는 한 DAG에 cron 하나라
+    # MultipleCronTriggerTimetable로 두 cron을 묶는다(분이 달라 단일 cron 불가).
+    schedule=MultipleCronTriggerTimetable(
+        "0 9 * * 1-5", "30 15 * * 1-5", timezone="Asia/Seoul"
+    ),
+    start_date=pendulum.datetime(2026, 1, 1, tz="Asia/Seoul"),
     catchup=False,                 # 뉴스는 과거 소급 무의미(24h 창)
-    default_args={"retries": 2, "retry_delay": 60},
+    default_args={"retries": 2, "retry_delay": pendulum.duration(seconds=60)},
 ) as dag:
     t_news    = PythonOperator(task_id="collect_news",
-                               python_callable=lambda: asyncio.run(_news("morning")))
+                               python_callable=lambda **c: asyncio.run(_news(_schedule_for(c))))
     t_company = PythonOperator(task_id="collect_company",
-                               python_callable=lambda: asyncio.run(CompanyCollector().run("morning")))
+                               python_callable=lambda **c: asyncio.run(CompanyCollector().run(_schedule_for(c))))
     t_embed   = PythonOperator(task_id="embed_cluster",
                                python_callable=lambda: asyncio.run(_embed()))
     # TODO: analyze Task — NewsAnalysisAgent(06, L2) 구현 후 t_embed >> t_analyze 추가
@@ -331,6 +348,99 @@ dags/                              ← Airflow DAG 정의
   ├── jangdokdae_macro.py        ← 보조: 매월 1일 (거시지표 ECOS 적재)
   └── jangdokdae_quarterly.py    ← 보조: 분기 첫날 (사업보고서 + 임베딩)
 
+Dockerfile                         ← apache/airflow 베이스 + 코어 의존성 (→ §12.3)
+docker-compose.yaml                ← postgres(metadata)+scheduler+apiserver+dag-processor (LocalExecutor)
+.dockerignore                      ← .venv·__pycache__·logs·tests 등 빌드 컨텍스트 제외
+
 services/
   └── pipeline/runner.py         ← run_pipeline() (하이브리드 로컬 실행용; 운영은 Airflow DAG)
 ```
+
+---
+
+## 12. 배포·실행 환경
+
+<callout icon="🚢" color="brown_bg">
+ 지금까지(§6~§11)는 "무엇을 어떤 순서로 실행하는가"였다. 이 장은 **"그 Airflow를 어디에 어떤 형태로 띄우는가"** — design 00이 그동안 비워뒀던 배포·실행 환경을 채운다. 핵심 결정은 **데모와 운영을 한 가지 구성(docker-compose)으로 잇는 것**이다.
+</callout>
+
+### 12.1 배포 옵션 비교
+
+Airflow는 "컨테이너 위에서 돌린다"는 점은 어디서나 같지만, **그 컨테이너를 누가·어디서 띄우느냐**가 갈린다. 시연 규모(LocalExecutor면 충분, → [0.3](#03-기본-아키텍처))를 기준으로 네 갈래를 비교한다.
+
+| 방식 | 대략 비용 | 운영 복잡도 | 데모↔운영 연속성 | 적합 규모 |
+|------|----------|------------|-----------------|----------|
+| **로컬 docker-compose** | 0 | 낮음 | 이미지·DAG 그대로 재사용 | 데모·발표 |
+| **Compute Engine + docker-compose** | 메모리 4GB+ VM(e2-medium~) 월 $25~50 | 중 (VM·재시작 직접 관리) | 데모 compose를 **그대로** 올림 | 소규모 운영 |
+| **GKE + 공식 Helm chart** | 클러스터 비용 + 운영 공수 | 높음 | 이미지 재사용, K8s 매니페스트 별도 작성 | 중·대규모 |
+| **Cloud Composer (관리형)** | 월 $300~400+ | 낮음 (위탁) | DAG만 업로드 (인프라 추상화) | 본격 운영 |
+
+> 공식 docker-compose는 Airflow가 **직접 제공**하지만 문서에 *"learning/exploration용, 프로덕션 아님"*으로 명시돼 있다. 프로덕션 자체 호스팅 표준은 **K8s + Helm**, 관리형 표준은 **Composer/MWAA/Astronomer**다 — 모두 컨테이너 기반이라는 점은 같고, docker-compose는 그 입문·시연 버전이다.
+
+### 12.2 선택: docker-compose 중심
+
+장독대는 **로컬 docker-compose를 정본**으로 삼는다.
+
+- **데모**: 로컬에서 `docker compose up` → 스케줄·의존성·재시도·Web UI까지 실제 Airflow로 시연.
+- **운영(소규모)**: **동일한 compose를 GCP Compute Engine VM에 그대로 올린다**(→ [12.4](#124-운영-승격-경로)). 이미지·DAG·환경이 데모와 동일하므로 "데모에서 됐는데 운영에서 안 되는" 간극이 없다.
+- **확장**: 트래픽·DAG가 커지면 **Cloud Composer(관리형)** 또는 **GKE+Helm**으로 승격 — DAG 코드는 그대로 두고 실행 환경만 교체.
+
+**근거**
+
+1. **한 구성이 데모·소규모 운영을 모두 커버** — "데모와 운영 사이"의 이중 작업을 없앤다.
+2. **비용 0 → 소액** — 학부 시연은 무료, 운영도 소형 VM 수준. Composer는 시연 규모엔 과한 고정비.
+3. **한계가 명확** — 단일 호스트라는 제약이 또렷해(→ [12.5](#125-배포의-한계)) 멘토 피드백 *"컴포넌트 각각의 한계를 정의했는가"*([2026-06-02](../mentoring/2026-06-02-feedback.md))에 직접 답할 수 있다.
+
+### 12.3 컨테이너 구성
+
+공식 docker-compose를 **LocalExecutor 기준으로 단순화**한다(Celery용 redis·worker·flower 제거).
+
+```
+docker-compose.yaml
+  ├─ postgres          ← Airflow metadata DB (run·task 상태·이력). 장독대 데이터 DB(Neon)와 별개
+  ├─ airflow-init      ← DB 마이그레이션 + 관리자 계정 1회 생성 (다른 서비스의 선행 조건)
+  ├─ airflow-apiserver ← Web UI·REST API (3.x에서 webserver 대체)
+  ├─ airflow-scheduler ← 스케줄·의존성 판정 + LocalExecutor로 Task 실행
+  └─ airflow-dag-processor ← dags/ 파싱·직렬화 (3.x 별도 서비스)
+```
+
+**Executor 선택** — 시연·소규모는 LocalExecutor가 정답이다.
+
+| Executor | 실행 방식 | 추가 인프라 | 장독대 |
+|----------|----------|------------|--------|
+| **LocalExecutor** | 단일 머신의 프로세스 병렬 | 없음 | **채택** — 수집 2종 병렬이면 충분 |
+| CeleryExecutor | 다중 워커 분산 | redis/rabbitmq + worker | 과함 (분산 불필요) |
+| KubernetesExecutor | Task당 pod | K8s 클러스터 | 확장 시점에 재검토 |
+
+**메타데이터 DB 분리** — Airflow의 상태 저장소(postgres 컨테이너)와 장독대 데이터 저장소(Neon)는 **완전히 별개**다(→ [0.3](#03-기본-아키텍처)). Task 코드는 Neon만 만지고, run·task 이력은 Airflow postgres에만 쌓인다. Airflow 3의 보안 모델(Task가 metadata DB 직접 접근 차단)과도 자연히 맞물린다.
+
+**커스텀 이미지 — 코어 의존성만** — `apache/airflow` 베이스에 장독대 단계가 import하는 패키지를 설치한다. 단 **임베딩·클러스터링 코어가 실제로 쓰는 것만** 넣는다:
+
+- **포함**: `langchain-google-vertexai`(gemini 임베딩), `hdbscan`·`scikit-learn`(`cluster.py`), `feedparser`·`httpx`·`finance-datareader`·`pykrx`·`trafilatura` 등 수집·전처리.
+- **제외**: `sentence-transformers`·`langchain-huggingface`(torch ~2GB). HuggingFace 백엔드는 `embedding_client.py`의 **조건부 분기**라 gemini 운영 경로에선 import되지 않는다(평가 전용). 빼면 이미지가 수 GB 가벼워지고 빌드도 빨라진다.
+
+> **의존성 격리 (중요)**: Airflow 3.0 코어는 SQLAlchemy **1.4**, 장독대 앱은 **2.0**(`DeclarativeBase` 등)이라 한 파이썬 환경에 못 섞는다. 앱 의존성을 이미지 안 **별도 venv**(`/home/airflow/jangdokdae-venv`)에 설치하고, DAG는 **`ExternalPythonOperator`**로 그 venv의 python을 호출한다 — 코어 환경(1.4)은 베이스 그대로 두고, 단계별 Task·관찰성을 유지하면서 충돌을 피한다. `hdbscan`은 네이티브 빌드라 이미지에 `gcc`/`g++`를 더한다.
+
+**코드·비밀·시각** — 단계 코드(`app/`·`services/`·`utils/`·`prompts/`)와 `dags/`는 볼륨 마운트하고(Airflow 실행 로그는 `logs/` 볼륨으로 영속화), `PYTHONPATH`로 import 경로를 잡는다. 비밀은 **기존 `.env`를 `env_file`로 주입**하고 `vertex_key.json`은 read-only 마운트한다 — Airflow Connection/Hook을 쓰지 않아 접속 정보 관리를 이원화하지 않는다(→ [0.4](#04-핵심-개념)). 컨테이너 타임존은 KST로 맞춰 DAG cron(`Asia/Seoul`)과 DB의 KST naive 저장(→ [01](./01-pipeline-orchestration-design.md))을 일치시킨다.
+
+### 12.4 운영 승격 경로
+
+데모에서 운영으로 갈 때 **다시 만들지 않는다** — 올리는 위치만 바뀐다.
+
+1. **CE VM 승격 (정본)**: 메모리 4GB+ Compute Engine 인스턴스(e2-medium 이상 권장)에 Docker 설치 → 같은 레포의 `docker-compose.yaml`을 그대로 `up`. 이미지·DAG·`.env`가 동일하므로 데모와 동작이 같다. 스케줄러가 KST cron으로 평일 09:00·15:30 자동 트리거.
+2. **Composer 전환 (확장 시)**: 관리형이 필요해지면 **`dags/`만 Composer 버킷에 업로드**하고 의존성은 Composer 환경에 선언한다. DAG 코드는 단계 함수를 그대로 호출하므로 수정이 거의 없다 — 인프라가 추상화돼 있기 때문.
+
+> 단계 간 데이터는 항상 공유 DB(Neon) 상태 핸드오프라(→ [6장](#6-전체-구조)), 실행 환경이 바뀌어도 단계 코드·핸드오프 규약은 불변이다. 이것이 "환경 교체만으로 승격"이 가능한 이유다.
+
+### 12.5 배포의 한계 (전환 신호)
+
+docker-compose 중심 선택의 **명시적 한계** — 이 선들을 넘으면 K8s/Composer로 전환한다.
+
+| 한계 | 무슨 문제 | 전환 신호 |
+|------|----------|----------|
+| **단일 호스트 SPOF** | 호스트가 죽으면 스케줄러·DB·전부 정지 | 가용성 SLA가 필요해질 때 |
+| **수동 재시작** | 컨테이너·VM 다운 시 자동 복구 없음 (systemd/`restart: always`로 완화하나 호스트 장애엔 무력) | 무중단 운영 요구 |
+| **스케일아웃 불가** | LocalExecutor는 단일 머신 — Task가 늘면 수직 확장만 | 동시 Task가 VM 한 대를 초과 |
+| **백필·대량 재처리 부담** | 큰 backfill을 단일 머신이 직렬 처리 | 과거 대량 재처리가 상시화 |
+
+> 현재 워크로드(평일 2회, 수집 2종 병렬 + 임베딩)는 이 한계선 안에 충분히 들어온다. 한계를 "지금 막아야 할 결함"이 아니라 **"전환 시점을 알려주는 계기판"**으로 둔다.
