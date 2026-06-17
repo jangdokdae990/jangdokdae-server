@@ -2,19 +2,21 @@
 
 기사 제목·URL·출처·발행일만 수집한다(본문·snippet은 저작권 문제로 저장하지 않음).
 Semaphore로 동시성을 제한하고 피드 단위로 에러를 격리한다. 발행일은 KST naive
-datetime으로 정규화한다(struct_time → dateutil 폴백).
+datetime으로 정규화한다(원본 문자열 파싱 우선, 오프셋 없으면 feed.tz로 해석 → struct_time 폴백).
 """
 
 import asyncio
 import logging
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from zoneinfo import ZoneInfo
 
 import feedparser
 import httpx
 from dateutil import parser as date_parser
 
 from services.collector.rss_feeds import ALL_FEEDS, FeedSource
+from services.collector.tools.with_retry import with_retry
 from utils.dates import to_naive_kst
 from utils.http import USER_AGENT
 
@@ -87,10 +89,13 @@ class RSSCollector:
             collected.extend(batch)
         return collected, failed_feeds
 
+    @with_retry(max_attempts=2, retry_on=httpx.TransportError)
     async def _fetch_feed(
         self, client: httpx.AsyncClient, feed: FeedSource
     ) -> list[CollectedNews]:
-        # HTTP 실패는 잡지 않고 전파한다 — collect()가 피드 단위로 격리·분류한다.
+        # 일시 네트워크 오류(TransportError)는 with_retry가 한 번 더 시도해 흡수한다 —
+        # 24h 윈도우라 한 사이클 누락이 일부 영구 손실이 될 수 있다. 재시도 소진·그 외
+        # 실패(4xx/5xx 등)는 전파해 collect()가 피드 단위로 격리·분류한다.
         response = await client.get(feed.url)
         response.raise_for_status()
 
@@ -115,6 +120,12 @@ class RSSCollector:
                     published_at=self._parse_published(entry, feed),
                 )
             )
+        if not collected:
+            # HTTP 200인데 기사가 0건 — 피드 포맷 변경·폐쇄로 인한 '조용한 실패' 신호.
+            # 피드 단위 실패(failed_feeds)로는 안 잡히므로 별도 경보로 끌어올린다.
+            logger.warning(
+                "RSS 피드 0건 수집 — 포맷 변경·폐쇄 의심 rss_source=%s", feed.rss_source
+            )
         return collected
 
     @staticmethod
@@ -133,29 +144,34 @@ class RSSCollector:
     def _parse_published(
         entry: feedparser.FeedParserDict, feed: FeedSource
     ) -> datetime | None:
-        """발행일을 한국 시간(KST) datetime으로 반환. 없거나 파싱 실패 시 None."""
-        # 1) feedparser가 파싱한 struct_time(UTC) 우선
+        """발행일을 한국 시간(KST naive) datetime으로 반환. 없거나 파싱 실패 시 None.
+
+        원본 문자열을 직접 파싱해 명시 오프셋(+0900 등)을 그대로 존중하고, 오프셋이 없는
+        시각은 피드 기준 타임존(feed.tz: 국내=KST·investing=UTC)으로 해석한다. feedparser의
+        struct_time은 오프셋 없는 입력을 UTC로 가정해버려 국내 피드(예: einfomax)의 KST 시각이
+        9시간 밀리므로, 문자열 파싱을 우선하고 struct_time은 폴백으로만 쓴다.
+        """
+        # 1) 원본 문자열 직접 파싱 — 명시 오프셋 존중, 없으면 feed.tz로 해석
+        raw = entry.get("published") or entry.get("updated")
+        if raw:
+            try:
+                parsed: datetime | None = date_parser.parse(raw)
+            except (ValueError, OverflowError, TypeError):
+                logger.debug("발행일 문자열 파싱 실패 rss_source=%s raw=%s", feed.rss_source, raw)
+                parsed = None
+            if parsed is not None:
+                if parsed.tzinfo is None:
+                    parsed = parsed.replace(tzinfo=ZoneInfo(feed.tz))
+                return to_naive_kst(parsed)
+
+        # 2) 문자열이 없거나 파싱 실패 — feedparser struct_time(UTC) 폴백
         parsed_time = entry.get("published_parsed") or entry.get("updated_parsed")
         if parsed_time:
-            # 깨진 struct_time은 변환 실패를 격리하고 2) 문자열 폴백으로 넘긴다.
             try:
                 utc_dt = datetime(*parsed_time[:6], tzinfo=timezone.utc)  # type: ignore[misc]
                 return to_naive_kst(utc_dt)
             except (ValueError, TypeError):
                 logger.debug("struct_time 변환 실패 rss_source=%s", feed.rss_source)
-
-        # 2) struct_time이 없으면 원본 문자열을 직접 파싱 (비표준 형식 피드 대응)
-        raw = entry.get("published") or entry.get("updated")
-        if raw:
-            try:
-                parsed: datetime = date_parser.parse(raw)
-            except (ValueError, OverflowError, TypeError):
-                logger.debug("발행일 파싱 실패 rss_source=%s raw=%s", feed.rss_source, raw)
-                return None
-            # 오프셋 없는 시각은 UTC로 가정 — struct_time 경로와 기준을 맞춰 9시간 어긋남 방지
-            if parsed.tzinfo is None:
-                parsed = parsed.replace(tzinfo=timezone.utc)
-            return to_naive_kst(parsed)
 
         logger.debug("발행일 없음 rss_source=%s", feed.rss_source)
         return None
