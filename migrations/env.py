@@ -18,6 +18,8 @@ from app.db.orm_models import (  # noqa: F401
     company_entity,
     disclosure,
     financial_statement,
+    industry,
+    industry_group,
     market_indicator,
     news,
     news_cluster,
