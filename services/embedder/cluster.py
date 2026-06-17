@@ -1,12 +1,7 @@
-"""뉴스 클러스터링 — HDBSCAN으로 같은 이슈 기사를 묶는다(설계 05 §5).
+"""뉴스 클러스터링 — HDBSCAN으로 같은 이슈 기사를 묶는다.
 
-채택 근거(05 §5.2): 오늘 주요 이슈가 몇 개인지 알 수 없어 클러스터 수 사전 지정이 불가능하고,
-밀도가 제각각인 이슈(금리 결정 50건 vs 단독 보도 2건)를 한 번에 처리해야 하므로 K-Means·임계값
-그룹핑이 아니라 HDBSCAN을 쓴다. min_cluster_size 하나로 나머지는 데이터가 결정한다.
-
-cluster_news/evaluate_clustering는 비교 하니스(05 §11)도 공유한다. 싱글톤 보존
-(promote_singletons)·중심 근접순 정렬(order_by_centrality)까지 이 모듈이 맡고, 중요도
-스코어링·news_cluster 적재는 score 모듈(05 §6)이 이 위에 쌓는다.
+클러스터 수를 미리 정할 수 없고 밀도가 제각각인 이슈를 한 번에 처리해야 하므로 HDBSCAN을 쓴다.
+싱글톤 보존·중심 근접순 정렬까지 이 모듈이 맡는다.
 """
 
 import logging
@@ -18,8 +13,8 @@ from sklearn.metrics.pairwise import cosine_similarity
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_MIN_CLUSTER_SIZE = 2  # 같은 이슈를 2개 이상 언론사가 보도하면 클러스터 형성(05 §5.6)
-DEFAULT_MIN_SAMPLES = 1       # 가장 공격적(noise 최소) — 싱글톤 보존 정책과 정합(05 §5.4)
+DEFAULT_MIN_CLUSTER_SIZE = 2  # 2개 이상 보도되면 클러스터 형성
+DEFAULT_MIN_SAMPLES = 1       # 가장 공격적(noise 최소) — 싱글톤 보존 정책과 정합
 
 
 def cluster_news(
@@ -33,7 +28,7 @@ def cluster_news(
     음수가 되면 HDBSCAN precomputed가 거부하므로 0 하한으로 클리핑한다.
     """
     if len(embeddings) < min_cluster_size:
-        # 표본이 최소 클러스터 크기보다 작으면 묶을 수 없다 — 전부 noise로 본다.
+        # 표본이 최소 클러스터 크기보다 작으면 묶을 수 없다 — 전부 noise.
         return np.full(len(embeddings), -1, dtype=int)
 
     distance_matrix = np.clip(1.0 - cosine_similarity(embeddings), 0.0, None).astype(np.float64)
@@ -41,7 +36,7 @@ def cluster_news(
         min_cluster_size=min_cluster_size,
         min_samples=min_samples,
         metric="precomputed",
-        cluster_selection_method="eom",  # excess of mass — 자연스러운 클러스터 선택(05 §5.2)
+        cluster_selection_method="eom",  # excess of mass — 자연스러운 클러스터 선택
     )
     labels: np.ndarray = clusterer.fit_predict(distance_matrix)
     return labels
@@ -51,11 +46,7 @@ def evaluate_clustering(
     embeddings: np.ndarray,
     labels: np.ndarray,
 ) -> dict[str, float | int | None]:
-    """클러스터링 자동 지표(설계 05 §5.5). noise(-1)는 품질 지표 계산에서 제외한다.
-
-    Silhouette/Davies-Bouldin은 noise 제외 후 클러스터가 2개 이상이어야 정의된다 —
-    그 조건을 못 채우면 None을 반환하고 호출부가 판단 보류하도록 한다.
-    """
+    """클러스터링 자동 지표를 계산한다. noise(-1)는 제외하며, 클러스터가 2개 미만이면 None."""
     n_clusters = len(set(labels)) - (1 if -1 in labels else 0)
     noise_ratio = float((labels == -1).sum() / len(labels)) if len(labels) else 0.0
 
@@ -70,7 +61,7 @@ def evaluate_clustering(
         }
 
     return {
-        # Silhouette: -1~1, 높을수록 좋음. 금융 뉴스는 0.2~0.35도 현실적(05 §5.3).
+        # Silhouette: -1~1, 높을수록 좋음.
         "silhouette": float(silhouette_score(embeddings[mask], labels[mask], metric="cosine")),
         # Davies-Bouldin: 낮을수록 좋음.
         "davies_bouldin": float(davies_bouldin_score(embeddings[mask], labels[mask])),
@@ -80,11 +71,10 @@ def evaluate_clustering(
 
 
 def promote_singletons(labels: np.ndarray) -> np.ndarray:
-    """noise(-1)를 각각 size-1 클러스터로 승격한다(설계 05 §5.4).
+    """noise(-1)를 각각 size-1 클러스터로 승격한다.
 
-    코퍼스가 이미 2중 정제(증권 RSS 도메인 + FilterChain 통과)됐으므로 noise는 "주제 무관"이
-    아니라 "오늘 단독 보도된 기사"다 — 잠재 고가치라 버리지 않는다. 모든 기사를 클러스터에 넣어
-    동일 기준으로 importance를 경쟁시키고(§6), 우선순위는 TOP_ISSUE_COUNT 컷오프가 정한다.
+    noise는 "주제 무관"이 아니라 "오늘 단독 보도된 기사"라 버리지 않고 모두 클러스터에 넣어
+    동일 기준으로 importance를 경쟁시킨다.
     """
     out = labels.copy()
     next_id = int(labels.max()) + 1 if len(labels) else 0
@@ -95,11 +85,9 @@ def promote_singletons(labels: np.ndarray) -> np.ndarray:
 
 
 def order_by_centrality(cluster_ids: list[int], embeddings: np.ndarray) -> list[int]:
-    """클러스터 중심에 가까운 순으로 기사 위치(행 인덱스)를 정렬한다(설계 05 §5.8).
+    """클러스터 중심에 가까운 순으로 기사 위치(행 인덱스)를 정렬한다.
 
-    인자 cluster_ids는 embeddings 행렬의 행 인덱스다. 반환 [0]=대표기사, 이후=본문 fetch
-    fallback·다관점 후보 순서. 대표를 1건만 두되 fetch 실패 시 다음 후보로 내려가도록
-    member_news_ids를 이 순서로 저장한다(02 §8.4).
+    인자 cluster_ids는 embeddings 행렬의 행 인덱스다. 반환 [0]=대표기사, 이후=fetch fallback 후보.
     """
     cluster_embeddings = embeddings[cluster_ids]
     centroid = cluster_embeddings.mean(axis=0)

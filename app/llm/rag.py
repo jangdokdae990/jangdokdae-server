@@ -1,13 +1,8 @@
-"""기업 컨텍스트 RAG 검색 — 사업보고서 청크에서 관련 컨텍스트를 찾아온다(설계 05 §7).
+"""기업 컨텍스트 RAG 검색 — 사업보고서 청크에서 관련 컨텍스트를 찾아온다.
 
-분석 단계 ImpactAnalysisChain의 related_companies 컨텍스트를 제공한다. report_chunks의
-임베딩(ReportEmbedder가 채움)을 pgvector cosine 거리로 검색한다 — 별도 벡터 DB·langchain
-PGVector 의존성 없이 EmbeddingClient(쿼리=RETRIEVAL_QUERY)와 ORM `<=>` 연산자만으로 처리해
-중복 제거(deduplicator)의 raw pgvector 방식과 일관되게 둔다.
-
-쿼리·문서를 다른 task_type으로 임베딩해 비대칭 검색을 만든다(05 §7.2: 청크는
-RETRIEVAL_DOCUMENT로, 쿼리는 RETRIEVAL_QUERY로). 벡터 DB에 매칭이 없으면 빈 문자열을
-반환해 호출부가 "확실치 않음"으로 처리하게 한다(멘토 RAG 엣지케이스 → 06 §6).
+report_chunks 임베딩을 pgvector cosine 거리로 검색한다. 별도 벡터 DB 없이 EmbeddingClient와
+ORM `<=>` 연산자만으로 처리한다. 쿼리는 RETRIEVAL_QUERY, 청크는 RETRIEVAL_DOCUMENT로
+비대칭 임베딩하며, 매칭이 없으면 빈 문자열을 반환해 호출부가 "확실치 않음"으로 처리하게 한다.
 """
 
 import asyncio

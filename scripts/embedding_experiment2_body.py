@@ -1,21 +1,17 @@
-"""실험2 — title-only vs title+body 임베딩 클러스터링 비교 (시각화 포함).
+"""title-only vs title+body 임베딩 클러스터링 비교 (시각화 포함).
 
-배경(설계 05 §2.2): 현재 뉴스 임베딩은 **제목 단독**이다. 제목은 키워드 밀도가 높아
-클러스터링에 실용적으로 충분하다는 가정인데, 본문을 더하면 클러스터링 품질이 달라지는지를
-실제 데이터로 측정한다. 실험1(10여 종 모델, 제목 단독, 비지도)과 동일한 모델·클러스터링·
-시각화 하니스를 그대로 쓰고, 입력 텍스트만 두 변형으로 바꿔 끝까지 돌려 나란히 비교한다.
+본문을 더하면 클러스터링 품질이 달라지는지를 실제 데이터로 측정한다. 입력 텍스트만
+두 변형으로 바꿔 동일한 모델·클러스터링·시각화로 끝까지 돌려 나란히 비교한다.
 
 변형:
     title_only : title
     title_body : title + "\n" + body[:BODY_CHAR_CAP]   (본문 fetch 후 인메모리 사용·폐기)
 
 본문 fetch:
-    분석 단계 도구 fetch_article_body(trafilatura)를 재사용하되, **리다이렉트 추적
-    클라이언트를 주입**한다 — 이 실험 당시 프로덕션 fetcher가 follow_redirects를 켜지 않아
-    국내 다수 매체의 http→https 301에서 실패함을 발견했고, 2026-06-11 프로덕션에도
-    follow_redirects가 적용됐다(article_fetcher.py). 페이월·WAF(investing.com 403)는
+    fetch_article_body(trafilatura)에 리다이렉트 추적 클라이언트를 주입한다 — 국내 다수
+    매체의 http→https 301에서 실패하는 것을 우회한다. 페이월·WAF(investing.com 403)는
     그대로 실패 → 본문 없는 기사는 공정 비교를 위해 표본에서 제외한다.
-    본문·snippet은 저장하지 않는다(저작권, 설계 02 §3) — 인메모리 임베딩 후 폐기.
+    본문·snippet은 저장하지 않는다(저작권) — 인메모리 임베딩 후 폐기.
 
 차이 정량화:
     두 변형의 클러스터 라벨을 adjusted_rand_score로 비교한다(ARI 높음=본문이 군집을 거의
@@ -63,7 +59,7 @@ from services.embedder.embedding_client import EmbeddingClient
 from utils.http import USER_AGENT
 
 DEFAULT_N_ARTICLES = 200
-BODY_CHAR_CAP = 2000  # 본문 앞 N자만 사용(설계 평가 §6 RAG 입력 캡과 동일 — 토큰 한도·일관성)
+BODY_CHAR_CAP = 2000  # 본문 앞 N자만 사용 — 토큰 한도·일관성
 FETCH_CONCURRENCY = 8
 OUTPUT_DIR = Path("output")
 DATASET_PATH = OUTPUT_DIR / "exp2_dataset.json"
@@ -88,7 +84,7 @@ async def build_dataset(n: int) -> dict:
     """뉴스 n건의 본문을 fetch(리다이렉트 추적)해 본문 성공분만 표본으로 만든다."""
     rows = await _fetch_rows(n)
     sem = asyncio.Semaphore(FETCH_CONCURRENCY)
-    # 리다이렉트 추적 클라이언트 주입 — 프로덕션 fetcher의 http→https 301 실패를 우회.
+    # 리다이렉트 추적 클라이언트 주입 — http→https 301 실패를 우회.
     async with httpx.AsyncClient(
         timeout=10.0, headers={"User-Agent": USER_AGENT}, follow_redirects=True
     ) as client:

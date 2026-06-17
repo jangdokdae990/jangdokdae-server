@@ -31,7 +31,7 @@ class ReportChunk(Base):
     __table_args__ = (
         UniqueConstraint("corp_code", "report_year", "chunk_type", "subsection",
                          name="uq_report_chunk"),
-        # RAG 유사도 검색용 HNSW 인덱스 (cosine). 설계 05 §3.
+        # RAG 유사도 검색용 HNSW 인덱스 (cosine).
         Index(
             "ix_report_chunks_embedding",
             "embedding",

@@ -1,17 +1,15 @@
 """임베딩 클러스터링 시각화 + 품질 검증 — 실제 뉴스로 결과를 눈으로·지표로 확인한다.
 
-설계 05 §5.5(자동 지표·정성 체크리스트)·§5.6(파라미터 그리드 스윕)·§5.7(2D 투영)을 한 번에 돌린다.
-모델 비교(scripts/embedding_compare_unsupervised.py)에서 우승한 모델로 클러스터링 결과를 시각화해
-"같은 이슈가 실제로 한 덩어리로 뭉치는가"를 검증하는 게 목적이다.
+클러스터링 결과를 시각화해 "같은 이슈가 실제로 한 덩어리로 뭉치는가"를 검증한다.
 
 산출물(output/, gitignore):
-    - cluster_<model>.html  : plotly 인터랙티브 — 점에 마우스 올리면 제목+클러스터 (정성 검증 핵심)
+    - cluster_<model>.html  : plotly 인터랙티브 — 점에 마우스 올리면 제목+클러스터
     - cluster_<model>.png   : matplotlib 정적 스캐터(한글 폰트)
-    - cluster_<model>.md    : 클러스터별 제목 목록 (정성 체크리스트용)
+    - cluster_<model>.md    : 클러스터별 제목 목록
     + 콘솔: 자동 지표 + (min_cluster_size, min_samples) 그리드 스윕
 
 주의:
-    클러스터링은 원차원(768/1024) 공간에서 하고, t-SNE는 *보기용* 2D 투영일 뿐이다. 2D에서
+    클러스터링은 원차원(768/1024) 공간에서 하고, t-SNE는 보기용 2D 투영일 뿐이다. 2D에서
     가까워/멀어 보이는 건 투영 왜곡일 수 있으니, 색(클러스터 라벨)과 hover(제목)로 판단한다.
 
 사용:
@@ -78,7 +76,7 @@ def project_2d(embeddings: np.ndarray) -> np.ndarray:
 
 
 def quality_report(embeddings: np.ndarray, labels: np.ndarray) -> None:
-    """자동 지표 + 정성 체크리스트(설계 05 §5.5)를 콘솔에 출력한다."""
+    """자동 지표 + 정성 체크리스트를 콘솔에 출력한다."""
     m = evaluate_clustering(embeddings, labels)
     sil = f"{m['silhouette']:.3f}" if m["silhouette"] is not None else "n/a"
     db = f"{m['davies_bouldin']:.3f}" if m["davies_bouldin"] is not None else "n/a"
@@ -92,7 +90,7 @@ def quality_report(embeddings: np.ndarray, labels: np.ndarray) -> None:
 
 
 def param_sweep(embeddings: np.ndarray) -> None:
-    """(min_cluster_size, min_samples) 2D 그리드 스윕(설계 05 §5.6) — 파라미터 적정성 검증."""
+    """(min_cluster_size, min_samples) 2D 그리드 스윕 — 파라미터 적정성 검증."""
     mcs_grid = [2, 3, 4, 5]
     ms_grid: list[int | None] = [1, 2, 3, None]  # None = HDBSCAN 기본(=min_cluster_size)
     print("\n=== 파라미터 그리드 스윕 (설계 §5.6) — 현재 기본값 mcs=2, ms=1 ===")
@@ -162,7 +160,7 @@ def save_matplotlib_png(
 def save_cluster_members_md(
     titles: list[str], labels: np.ndarray, path: Path, model_name: str
 ) -> None:
-    """클러스터별 제목 목록 — 정성 체크리스트(§5.5)를 위해 큰 클러스터부터 나열한다."""
+    """클러스터별 제목 목록 — 큰 클러스터부터 나열한다."""
     clusters = _group_clusters(titles, labels)
     lines = [f"# 클러스터 멤버 — {model_name}\n"]
     real = {k: v for k, v in clusters.items() if k != -1}

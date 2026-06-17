@@ -1,24 +1,20 @@
-"""RAG 검색 품질 벤치마크 — 사업보고서 청크 검색에서 임베딩 모델을 비교한다(설계 05 §11 ③).
+"""RAG 검색 품질 벤치마크 — 사업보고서 청크 검색에서 임베딩 모델을 비교한다.
 
-비지도 클러스터링(experiment1)·라벨 클러스터링(embedding_model_benchmark)이 못 재는 축인
-**RAG recall**만 따로 측정한다. report_chunks(섹션 단위)를 코퍼스로 두고, 사람이 라벨링한
+report_chunks(섹션 단위)를 코퍼스로 두고, 사람이 라벨링한
 쿼리(scripts/data/rag_queries.json)별로 정답 섹션이 상위 k에 드는지 본다.
-
-분석 파이프라인의 get_company_context(설계 05 §7.2)는 "기업명 + 주제"로 그 기업의 맞는
-섹션을 끌어와야 한다 — 코퍼스에 여러 기업의 동일 유형 섹션(원재료·재무건전성 등)이 분산자로
-섞여 있어, 모델이 기업·주제를 함께 변별하는지가 핵심이다.
+코퍼스에 여러 기업의 동일 유형 섹션(원재료·재무건전성 등)이 분산자로 섞여 있어,
+모델이 기업·주제를 함께 변별하는지가 핵심이다.
 
 지표:
     - recall@1/3/5 : 쿼리별 top-k에 정답 청크가 든 비율의 평균
     - MRR          : 첫 정답 청크 순위의 역수 평균(순위 품질까지 반영)
 
-청크는 RETRIEVAL_DOCUMENT, 쿼리는 RETRIEVAL_QUERY task type으로 임베딩한다(05 §7).
-Vertex 계열만 task type을 반영하고 HuggingFace는 무시한다(embedding_client.py).
+청크는 RETRIEVAL_DOCUMENT, 쿼리는 RETRIEVAL_QUERY task type으로 임베딩한다.
+Vertex 계열만 task type을 반영하고 HuggingFace는 무시한다.
 
 주의 — 섹션 길이와 모델 컨텍스트:
     report_chunks는 섹션 통째라 일부는 수만 자다. 512토큰 모델(ko-sroberta·kf-deberta)은
-    뒤가 잘리므로 긴 섹션에서 불리하다. 이는 결함이 아니라 "이 모델은 서브청킹이 필요하다"는
-    실제 선택 근거다 — 결과 해석 시 코퍼스 길이 통계와 함께 본다.
+    뒤가 잘리므로 긴 섹션에서 불리하다. 결과 해석 시 코퍼스 길이 통계와 함께 본다.
 
 사용:
     python -m scripts.rag_recall_benchmark
@@ -54,9 +50,8 @@ QUERIES_PATH = Path("scripts/data/rag_queries.json")
 RECALL_KS = (1, 3, 5)
 
 # 섹션 통짜(최대 89k자)를 그대로 임베딩하면 8192토큰 모델(bge-m3 계열)이 MPS에서 버퍼
-# 초과로 크래시한다. 현실적 서브청크 크기로 본문을 앞에서부터 캡한다 — 2000자는 8192토큰
-# 모델엔 여유(~1.3k토큰)이고, 512토큰 모델은 자체 한계로 더 잘린다(섹션 도입부에 핵심 요약이
-# 모여 있어 쿼리 주제는 대개 앞부분에서 매칭된다). 프로덕션 임베더도 동일 캡이 필요하다.
+# 초과로 크래시한다. 본문을 앞에서부터 캡한다 — 섹션 도입부에 핵심 요약이 모여 있어
+# 쿼리 주제는 대개 앞부분에서 매칭된다.
 MAX_CHUNK_CHARS = 2000
 
 

@@ -1,11 +1,7 @@
-"""사업보고서 청크 임베딩 — RAG 소스 준비(설계 05 §7).
+"""사업보고서 청크 임베딩 — RAG 소스 준비.
 
-report_chunks의 embedding IS NULL 청크를 임베딩해 분석 단계 ImpactAnalysisChain의 기업
-컨텍스트(related_companies, →rag.py)를 제공한다. 입력은 청크 본문 전체(content) — RAG
-검색 정확도를 위해 제목만 쓰는 뉴스와 달리 본문을 그대로 쓴다(05 §9). task_type은
-RETRIEVAL_DOCUMENT — 검색 대상 문서로 임베딩해 쿼리(RETRIEVAL_QUERY)와 비대칭 매칭한다.
-
-뉴스 임베딩과 독립적이라 EmbeddingClusterer가 둘을 병렬 실행한다(설계 05 §8.3).
+embedding IS NULL 청크를 임베딩해 분석 단계의 기업 컨텍스트를 제공한다. 입력은 청크 본문
+전체(content)이며, task_type은 RETRIEVAL_DOCUMENT — 쿼리(RETRIEVAL_QUERY)와 비대칭 매칭한다.
 """
 
 import asyncio

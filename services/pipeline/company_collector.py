@@ -1,13 +1,11 @@
 """CompanyCollector — 기업 데이터 수집 단계 진입점 (Airflow Task, 정적 분기).
 
-schedule 값에 따라 수집 대상을 분기한다(설계 03 §7.4):
+schedule 값에 따라 수집 대상을 분기한다:
     - "morning"/"afternoon": 당일·전일 공시 메타데이터 → disclosures
     - "macro":               이번 달 거시지표(금리·CPI·M2) → market_indicators
     - "quarterly":           전년도 재무제표 + 사업보고서 청크 → financial_statements·report_chunks
 
-수집기 호출은 입출력이 고정이고 분기가 정적이라 LangGraph가 아니라 Airflow Task로 둔다
-(설계 00 §5.1). 단계끼리 직접 호출하지 않고 공유 DB로만 핸드오프하므로, 각 수집기
-산출물을 save_tool로 즉시 멱등 저장한다. 주가·환율은 적재하지 않는다(분석 시점 on-demand).
+각 수집기 산출물을 save_tool로 즉시 멱등 저장한다. 주가·환율은 적재하지 않는다(분석 시점 on-demand).
 """
 
 import asyncio

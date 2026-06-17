@@ -1,10 +1,10 @@
-"""분기 보고서 수집 DAG — 분기 첫날 09:00 KST(설계 00 §7.2).
+"""분기 보고서 수집 DAG — 분기 첫날 09:00 KST.
 
 흐름: collect_reports >> embed_reports
-사업보고서·재무는 분기 주기라 메인과 분리한다. 수집한 사업보고서 청크를 임베딩해
-분석 단계 ImpactAnalysisChain의 기업 컨텍스트(RAG)로 제공한다(05 §7).
+사업보고서·재무는 분기 주기라 메인과 분리한다. 수집한 청크를 임베딩해 분석 단계의
+기업 컨텍스트(RAG)로 제공한다.
 
-단계 실행은 ExternalPythonOperator로 앱 전용 venv에서 돌린다(설계 00 §12.3).
+단계 실행은 ExternalPythonOperator로 앱 전용 venv에서 돌린다.
 """
 
 from __future__ import annotations
