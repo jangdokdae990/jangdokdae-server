@@ -88,8 +88,18 @@ async def upsert_disclosures(db: AsyncSession, records: list[dict]) -> int:
 
 
 async def upsert_market_indicators(db: AsyncSession, records: list[dict]) -> int:
-    """거시지표를 (indicator_type, currency, date) 기준 UPSERT."""
-    return await _upsert(db, MarketIndicator, records, ["indicator_type", "currency", "date"])
+    """거시지표를 (indicator_type, currency, date) 기준 UPSERT — 충돌 시 value 갱신.
+
+    ECOS는 잠정치를 이후 확정치로 개정할 수 있으므로 같은 (지표·통화·일자)를 재수집하면
+    value를 새 값으로 갱신한다(DO NOTHING이면 잠정치가 영구 고정됨).
+    """
+    return await _upsert(
+        db,
+        MarketIndicator,
+        records,
+        ["indicator_type", "currency", "date"],
+        update_columns=["value"],
+    )
 
 
 async def upsert_financial_statements(db: AsyncSession, records: list[dict]) -> int:
