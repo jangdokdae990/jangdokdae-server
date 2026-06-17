@@ -21,12 +21,49 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
 from app.db.orm_models.company_entity import CompanyEntity
+from app.db.orm_models.sector import Sector
 from utils.dates import now_kst
 
 logger = logging.getLogger(__name__)
 
 DART_CORP_CODE_URL = "https://opendart.fss.or.kr/api/corpCode.xml"
 DEFAULT_TIMEOUT = 30.0
+
+# KRX 업종명(PyKRX get_market_sector_classifications) → GICS 섹터 코드(sectors.gics_code).
+# KRX 업종은 GICS 섹터와 입도가 달라 일부(일반서비스·유통·운송장비·기타제조·농림어업)는
+# 대표 업종 기준 근사 매핑이다. KRX엔 별도 '에너지' 업종이 없어 GICS 에너지(10)는 비는 게 정상.
+# 미매핑 업종은 sector_id를 NULL로 남긴다(기존 값은 보존).
+KRX_SECTOR_TO_GICS: dict[str, str] = {
+    "전기·전자": "45",          # IT
+    "IT 서비스": "45",          # IT
+    "화학": "15",               # 소재
+    "기계·장비": "20",          # 산업재
+    "제약": "35",               # 헬스케어
+    "일반서비스": "25",         # 경기소비재(근사 — 서비스 다수)
+    "유통": "25",               # 경기소비재(근사 — 도소매)
+    "운송장비·부품": "25",      # 경기소비재(근사 — 자동차 다수, 조선·방산 일부 산업재)
+    "금속": "15",               # 소재
+    "금융": "40",               # 금융
+    "의료·정밀기기": "35",      # 헬스케어
+    "기타금융": "40",           # 금융
+    "음식료·담배": "30",        # 필수소비재
+    "오락·문화": "50",          # 커뮤니케이션서비스
+    "건설": "20",               # 산업재
+    "섬유·의류": "25",          # 경기소비재
+    "비금속": "15",             # 소재
+    "운송·창고": "20",          # 산업재
+    "증권": "40",               # 금융
+    "종이·목재": "15",          # 소재
+    "부동산": "60",             # 부동산
+    "기타제조": "20",           # 산업재(근사)
+    "보험": "40",               # 금융
+    "통신": "50",               # 커뮤니케이션서비스
+    "전기·가스": "55",          # 유틸리티
+    "은행": "40",               # 금융
+    "농업 임업 및 어업": "30",  # 필수소비재(근사)
+    "전기·가스·수도": "55",     # 유틸리티
+    "출판·매체복제": "50",      # 커뮤니케이션서비스
+}
 
 
 @dataclass(frozen=True)
@@ -100,20 +137,30 @@ async def sync_company_master(db: AsyncSession) -> dict[str, int]:
     # 동기화 전 기존 레코드 수 (신규 유입 규모 가늠용)
     existing = await db.scalar(select(func.count()).select_from(CompanyEntity)) or 0
 
-    # 신규 레코드 upsert (기존은 market·corp_code만 갱신, 그 외 컬럼은 보존)
-    # NOTE: PyKRX 업종명 → sectors.sector_id 매핑은 미구현. 현재 sector_id는
-    #       seed/수동 관리에 의존하며, 신규 종목은 sector 미분류 상태로 적재된다.
-    records = []
+    # GICS 섹터 코드 → sector_id (KRX 업종명 매핑 결과를 FK로 변환)
+    sector_rows = (await db.execute(select(Sector.id, Sector.gics_code))).all()
+    gics_to_sector_id = {gics: sid for sid, gics in sector_rows}
+
+    # 신규 레코드 upsert (기존은 market·corp_code·sector_id 갱신, name_ko·is_active는 보존)
+    # PyKRX 업종명 → GICS 섹터(KRX_SECTOR_TO_GICS) → sector_id. 미매핑/조회실패는 NULL.
+    records: list[dict[str, object]] = []
+    mapped = 0
     for corp in corps:
-        market, _ = sector_market.get(corp.krx_code, (None, None))
+        market, krx_sector = sector_market.get(corp.krx_code, (None, None))
+        gics = KRX_SECTOR_TO_GICS.get(krx_sector or "")
+        sector_id = gics_to_sector_id.get(gics) if gics else None
+        if sector_id is not None:
+            mapped += 1
         records.append({
             "stock_code": corp.krx_code,
             "name_ko": corp.name,
             "corp_code": corp.dart_code,
             "market": market or "UNKNOWN",
+            "sector_id": sector_id,
             "aliases": [],
             "is_active": False,  # 신규 종목은 기본 비활성화
         })
+    logger.info("섹터 매핑: %d/%d (KRX 업종명 → GICS sector_id)", mapped, len(records))
 
     if not records:
         return {"total": 0, "existing": existing}
@@ -132,6 +179,10 @@ async def sync_company_master(db: AsyncSession) -> dict[str, int]:
                     func.nullif(stmt.excluded.market, "UNKNOWN"), CompanyEntity.market
                 ),
                 "corp_code": stmt.excluded.corp_code,
+                # 미매핑(NULL)이면 기존 sector_id를 보존, 매핑됐으면 갱신
+                "sector_id": func.coalesce(
+                    stmt.excluded.sector_id, CompanyEntity.sector_id
+                ),
             },
         )
         await db.execute(stmt)
