@@ -1,21 +1,10 @@
 """거시지표 수집기 — FinanceDataReader 환율 + 한국은행 ECOS 금리·CPI·M2.
 
-역할:
-    거시 이슈 분석 컨텍스트로 쓰일 두 종류의 시계열을 수집한다(설계 03 §4.4–4.5).
-    소스가 둘로 나뉘어 진입점도 둘이다:
-      - collect():      환율 4종(USD·JPY·EUR·CNY/KRW) — FinanceDataReader(동기→to_thread)
-      - collect_ecos(): 기준금리·CPI·M2 — 한국은행 ECOS API(비동기 httpx)
+진입점이 둘이다:
+    - collect():      환율 4종(USD·JPY·EUR·CNY/KRW) — FinanceDataReader(동기→to_thread)
+    - collect_ecos(): 기준금리·CPI·M2 — 한국은행 ECOS API(비동기 httpx)
 
-핵심 동작:
-    - 두 경로 모두 지표/통화 단위로 에러를 격리한다.
-    - 환율은 일별, ECOS는 월별. NaN(휴장일)·결측치 행은 스킵한다.
-    - ECOS 예외 로깅은 redact_secrets로 감싸 URL 경로의 API 키 유출을 막는다.
-
-경계:
-    출력 = CollectedIndicator.to_record() → save_tool.upsert_market_indicators
-    (indicator_type, currency, date) UPSERT. 환율은 currency 값 있음, ECOS는 NULL.
-주의:
-    ECOS 주기 코드는 "M"(설계 문서의 "MM"은 오기), M2는 161Y006(구 표 101Y004는 폐지).
+두 경로 모두 지표/통화 단위로 에러를 격리한다. NaN(휴장일)·결측치 행은 스킵한다.
 """
 
 import asyncio
@@ -55,7 +44,7 @@ class EcosIndicator:
 
 
 # 모두 월별(M). currency는 NULL (환율이 아님)
-# 주의: 설계 문서의 M2 코드(101Y004)는 2004년 폐지된 구 표. 현재 M2는 161Y006(1.1.3.1.2)이다.
+# 주의: M2 코드는 161Y006 (구 표 101Y004는 폐지됨)
 ECOS_INDICATORS: tuple[EcosIndicator, ...] = (
     EcosIndicator("interest_rate", "722Y001", "0101000", "M"),  # 한국은행 기준금리
     EcosIndicator("cpi", "901Y009", "0", "M"),                  # 소비자물가지수 총지수
@@ -71,7 +60,7 @@ class CollectedIndicator:
     date: date
 
     def to_record(self) -> dict[str, object]:
-        # save_tool.upsert_market_indicators / MarketIndicator 컬럼 입력 형식
+        # MarketIndicator 컬럼 입력 형식
         return {
             "indicator_type": self.indicator_type,
             "currency": self.currency,

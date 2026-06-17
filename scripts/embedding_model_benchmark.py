@@ -1,18 +1,12 @@
 """임베딩 모델 비교 하니스 — 후보 모델을 동일 라벨셋으로 끝까지 돌려 결과표 한 장으로 비교.
 
-설계 05 §11. 모델을 바꾸면 임베딩 전체 재계산 + (1024 모델은) 차원 마이그레이션이 따르므로
-**첫 배포 전에** 실제 장독대 데이터로 모델을 확정해야 한다. cosine 분리도만 보지 말고
-클러스터링(ARI·Silhouette)·RAG(recall@5)까지 같은 조건으로 측정한다.
+cosine 분리도만 보지 말고 클러스터링(ARI·Silhouette)·RAG(recall@5)까지 같은 조건으로 측정한다.
 
 지표:
     - pair_auc   : 같은이슈 쌍 vs 다른이슈 쌍 cosine을 AUC로(임계값 무관 단일 분리도 수치)
     - ari        : 동일 HDBSCAN 설정 결과를 사람 정답(gold_labels)과 비교한 Adjusted Rand Index
     - silhouette : 클러스터 응집도(noise 제외, cosine)
     - rag_recall : (선택) 쿼리별 similarity_search top-5에 정답 청크가 든 비율
-
-판정(05 §11): pair_auc·ari가 baseline 대비 유의하게 높고 gemini·KURE 격차가 작으면
-스키마 유지·인프라 통일 이점이 있는 gemini-embedding-001 채택. KURE가 RAG recall에서 크게
-앞서면 1024 전환 비용을 감수하고 KURE 채택 검토.
 
 사용:
     python -m scripts.embedding_model_benchmark [labelset.json]
@@ -31,7 +25,7 @@ from sklearn.metrics.pairwise import cosine_similarity
 from services.embedder.cluster import cluster_news, evaluate_clustering
 from services.embedder.embedding_client import EmbeddingClient, embed_with
 
-# 비교 대상 — 관리형 1 + 오픈소스 2(baseline 포함). 설계 05 §11.
+# 비교 대상 — 관리형 1 + 오픈소스 2(baseline 포함).
 CANDIDATE_MODELS = [
     "gemini-embedding-001",         # Vertex AI, 768 절단, MTEB Multilingual 1위 (관리형 후보)
     "gemini-embedding-2-preview",   # 후속 v2(genai, 8192토큰), us-central1 전용 — 001과 비교
@@ -50,9 +44,9 @@ def _pair_sims(sim_matrix: np.ndarray, pairs: list[list[int]]) -> list[float]:
 
 
 def rag_recall_at_k(model_name: str, rag: dict, k: int = RAG_TOP_K) -> float | None:
-    """RAG 검색 품질(설계 05 §11 ③) — 쿼리별 top-k에 정답 청크가 든 비율의 평균.
+    """RAG 검색 품질 — 쿼리별 top-k에 정답 청크가 든 비율의 평균.
 
-    chunks는 RETRIEVAL_DOCUMENT, query는 RETRIEVAL_QUERY task type으로 임베딩한다(05 §7).
+    chunks는 RETRIEVAL_DOCUMENT, query는 RETRIEVAL_QUERY task type으로 임베딩한다.
     rag 데이터가 없으면 None을 반환해 표에서 'n/a'로 표시한다.
     """
     chunks = rag.get("chunks") or []
@@ -111,7 +105,7 @@ def _fmt(value: float | None) -> str:
 
 
 def print_results(results: list[dict]) -> None:
-    """결과표를 정렬해 출력한다(설계 05 §11 결과표 양식)."""
+    """결과표를 정렬해 출력한다."""
     header = f"{'model':<30}{'pair_auc':>10}{'ari':>8}{'silhouette':>12}{'pos/neg':>16}{'rag@5':>8}"
     print(header)
     print("-" * len(header))

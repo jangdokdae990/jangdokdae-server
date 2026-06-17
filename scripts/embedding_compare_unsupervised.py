@@ -1,13 +1,11 @@
 """임베딩 모델 비지도 비교 — 실제 수집 뉴스로 라벨 없이 모델별 클러스터링 품질을 본다.
 
-설계 05 §11의 정식 라벨 벤치마크(pair_auc·ARI)는 사람이 매긴 정답이 있어야 한다.
-이 스크립트는 라벨이 아직 없을 때 **실제 Neon 뉴스 제목**으로 후보 모델을 각각 클러스터링해
-silhouette·클러스터 수·noise 비율과 **샘플 클러스터**를 나란히 찍어 눈으로 품질을 비교한다.
+라벨이 아직 없을 때 실제 뉴스 제목으로 후보 모델을 각각 클러스터링해
+silhouette·클러스터 수·noise 비율과 샘플 클러스터를 나란히 찍어 눈으로 품질을 비교한다.
 
 주의(해석):
-    - silhouette은 각 모델의 *자기* 임베딩 공간에서 계산되므로 모델 간 절대 비교는 약하다.
+    - silhouette은 각 모델의 자기 임베딩 공간에서 계산되므로 모델 간 절대 비교는 약하다.
       진짜 신호는 "같은 이슈 기사가 한 클러스터에 잘 묶이는가"를 샘플 클러스터로 눈으로 보는 것.
-    - 정식 순위는 라벨 벤치마크(scripts/embedding_model_benchmark.py)로 확정한다.
 
 사용:
     python -m scripts.embedding_compare_unsupervised [n_titles]   # 기본 300건
@@ -24,7 +22,7 @@ from app.db.base import AsyncSessionLocal
 from services.embedder.cluster import cluster_news, evaluate_clustering
 from services.embedder.embedding_client import embed_with
 
-# 비교 대상 — 설계 05 §11 후보(관리형 1 + 오픈소스 2).
+# 비교 대상 — 관리형 1 + 오픈소스 2.
 CANDIDATE_MODELS = [
     "gemini-embedding-001",         # Vertex AI, 768 절단 (인증 필요)
     "nlpai-lab/KURE-v1",            # 한국어 검색 특화, 1024

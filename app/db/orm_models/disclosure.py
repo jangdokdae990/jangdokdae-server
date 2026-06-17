@@ -32,7 +32,7 @@ class Disclosure(Base):
     )
     embedding: Mapped[list[float] | None] = mapped_column(Vector(768), nullable=True)
 
-    # 유사도 검색용 HNSW 인덱스 (cosine). 설계 05 §3 — pgvector 활성화 직후 생성.
+    # 유사도 검색용 HNSW 인덱스 (cosine).
     __table_args__ = (
         Index(
             "ix_disclosures_embedding",

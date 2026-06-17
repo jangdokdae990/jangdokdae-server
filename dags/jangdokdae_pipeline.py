@@ -1,14 +1,14 @@
-"""메인 파이프라인 DAG — 평일 09:00·15:30 KST, 1 run = 전체 완주(설계 00 §7.1·§8).
+"""메인 파이프라인 DAG — 평일 09:00·15:30 KST, 1 run = 전체 완주.
 
-흐름: [collect_news, collect_company] >> embed_cluster (분석 06은 미구현 TODO).
-각 Task가 단계를 직접 호출하고, 단계 간 데이터는 공유 DB(Neon) 상태로만 핸드오프한다(§6).
+흐름: [collect_news, collect_company] >> embed_cluster (분석은 미구현 TODO).
+각 Task가 단계를 직접 호출하고, 단계 간 데이터는 공유 DB(Neon) 상태로만 핸드오프한다.
 
-Airflow 코어(SQLAlchemy 1.4)와 장독대 앱(SQLAlchemy 2.0)은 의존성이 충돌하므로, 단계
-실행은 ExternalPythonOperator로 앱 전용 venv(SQLA 2.0)에서 돌린다(설계 00 §12.3). callable은
-venv에서 직렬화 실행되므로 self-contained(내부 import + sys.path 보강)로 작성한다.
+Airflow 코어(SQLAlchemy 1.4)와 앱(SQLAlchemy 2.0)이 충돌하므로 단계 실행은
+ExternalPythonOperator로 앱 전용 venv에서 돌린다. callable은 venv에서 직렬화 실행되므로
+self-contained(내부 import + sys.path 보강)로 작성한다.
 
-09:00 run은 morning, 15:30 run은 afternoon 공시를 수집한다 — 두 트리거를 한 DAG에
-묶었으므로 logical_date(KST)로 schedule을 갈라 op_args(Jinja)로 넘긴다.
+09:00 run은 morning, 15:30 run은 afternoon 공시를 수집한다 — 각 collect callable이 실행
+시점 KST 시각으로 가른다.
 """
 
 from __future__ import annotations
@@ -18,22 +18,20 @@ from airflow.providers.standard.operators.python import ExternalPythonOperator
 from airflow.sdk import DAG
 from airflow.timetables.trigger import MultipleCronTriggerTimetable
 
-# 앱 의존성(SQLA 2.0)을 격리한 venv — Airflow 코어(1.4)와 분리(설계 00 §12.3)
+# 앱 의존성(SQLA 2.0)을 격리한 venv — Airflow 코어(1.4)와 분리
 APP_PYTHON = "/home/airflow/jangdokdae-venv/bin/python"
-# 09:00 run=morning, 15:30 run=afternoon (Jinja로 렌더해 op_args로 전달)
-SCHEDULE_ARG = (
-    "{{ 'morning' if data_interval_start.in_timezone('Asia/Seoul').hour < 12 "
-    "else 'afternoon' }}"
-)
-
-
-def _collect_news(schedule: str) -> None:
+# 09:00 run=morning, 15:30 run=afternoon. 실행 시점 KST 시각으로 callable 내부에서 가른다.
+def _collect_news() -> None:
     import asyncio
     import sys
+    from datetime import datetime, timedelta, timezone
 
     sys.path.insert(0, "/opt/jangdokdae")
     from app.db.base import AsyncSessionLocal
     from services.pipeline.news_collector import NewsCollector
+
+    kst = timezone(timedelta(hours=9))
+    schedule = "morning" if datetime.now(kst).hour < 12 else "afternoon"
 
     async def _run() -> None:
         async with AsyncSessionLocal() as db:
@@ -42,12 +40,16 @@ def _collect_news(schedule: str) -> None:
     asyncio.run(_run())
 
 
-def _collect_company(schedule: str) -> None:
+def _collect_company() -> None:
     import asyncio
     import sys
+    from datetime import datetime, timedelta, timezone
 
     sys.path.insert(0, "/opt/jangdokdae")
     from services.pipeline.company_collector import CompanyCollector
+
+    kst = timezone(timedelta(hours=9))
+    schedule = "morning" if datetime.now(kst).hour < 12 else "afternoon"
 
     asyncio.run(CompanyCollector().run(schedule))
 
@@ -82,14 +84,12 @@ with DAG(
         task_id="collect_news",
         python=APP_PYTHON,
         python_callable=_collect_news,
-        op_args=[SCHEDULE_ARG],
         expect_airflow=False,  # venv엔 airflow 미설치(앱 의존성만)
     )
     collect_company = ExternalPythonOperator(
         task_id="collect_company",
         python=APP_PYTHON,
         python_callable=_collect_company,
-        op_args=[SCHEDULE_ARG],
         expect_airflow=False,
     )
     embed_cluster = ExternalPythonOperator(
@@ -98,5 +98,5 @@ with DAG(
         python_callable=_embed_cluster,
         expect_airflow=False,
     )
-    # TODO: analyze Task — NewsAnalysisAgent(06, L2) 구현 후 embed_cluster >> analyze 연결
+    # TODO: analyze Task — NewsAnalysisAgent 구현 후 embed_cluster >> analyze 연결
     [collect_news, collect_company] >> embed_cluster

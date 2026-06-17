@@ -1,6 +1,5 @@
 """공시·재무·사업보고서 backfill — 과거 N년치 1회 적재.
 
-주기 실행 DAG와 분리해 실수 재실행으로 인한 데이터 오염을 막는다(설계 03 §5.3·§7.6).
 ON CONFLICT DO NOTHING이라 중단 후 재실행해도 안전하다(멱등). 주가·환율은 on-demand
 조회 대상이라 backfill하지 않는다.
 
@@ -33,8 +32,8 @@ async def backfill(years: int = 3) -> dict[str, int]:
         companies = await load_active_companies(db)
         disclosures = await DARTCollector(companies).collect(bgn_de, end_de)
         d_n = await upsert_disclosures(db, [c.to_record() for c in disclosures])
-        # 재무·사업보고서는 사업연도 단위 API라 연도별로 순회 수집한다. 두 수집기는 독립
-        # 엔드포인트라 연도마다 병렬 수집한다(company_collector._collect_quarterly와 동일 패턴).
+        # 재무·사업보고서는 사업연도 단위 API라 연도별로 순회 수집한다.
+        # 두 수집기는 독립 엔드포인트라 연도마다 병렬 수집한다.
         financial_collector = FinancialCollector(companies)
         report_collector = ReportCollector(companies)
         f_n = r_n = 0

@@ -1,9 +1,9 @@
-"""거시지표 수집 DAG — 매월 1일 16:00 KST(설계 00 §7.2).
+"""거시지표 수집 DAG — 매월 1일 16:00 KST.
 
 거시지표(ECOS: 금리·CPI·M2)는 월 주기라 메인 파이프라인과 분리한다. 적재만 하고, 다음
-메인 run의 embed·analyze가 상태 핸드오프로 흡수한다. 주가·환율은 적재하지 않는다(03 §5.1).
+메인 run의 embed·analyze가 흡수한다.
 
-단계 실행은 ExternalPythonOperator로 앱 전용 venv에서 돌린다(설계 00 §12.3).
+단계 실행은 ExternalPythonOperator로 앱 전용 venv에서 돌린다.
 """
 
 from __future__ import annotations

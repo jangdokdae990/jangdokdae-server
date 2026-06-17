@@ -1,18 +1,8 @@
-"""테이블별 UPSERT 공통 도구 — 모든 수집기·에이전트가 공유하는 DB 저장 경계.
+"""테이블별 UPSERT 공통 도구 — 수집기·에이전트가 공유하는 DB 저장 경계.
 
-역할:
-    각 수집기의 to_record() 산출물(list[dict])을 받아 PostgreSQL ON CONFLICT
-    DO NOTHING으로 멱등 저장한다. 테이블별 충돌 키(url, rcept_no, (stock_code,date) 등)를
-    upsert_* 함수가 캡슐화하므로 호출부는 충돌 규칙을 몰라도 된다.
-
-핵심 동작:
-    - _upsert(): 빈 입력은 0 반환(=DB 미접근, db=None 테스트 허용). 대량 입력은
-      PostgreSQL 바인드 파라미터 상한(65,535)을 넘지 않도록 (행수×컬럼수) 기준으로
-      청크 분할하되, 전체를 1회 commit해 배치 원자성을 유지한다.
-    - DO NOTHING이므로 충돌 행은 '무시'된다 — 기존 값 보정(update)은 하지 않는다.
-
-대상 테이블:
-    news / stock_prices / disclosures / market_indicators / financial_statements / report_chunks.
+각 수집기의 to_record() 산출물(list[dict])을 받아 PostgreSQL ON CONFLICT로 멱등
+저장한다. 테이블별 충돌 키는 upsert_* 함수가 캡슐화한다. 대량 입력은 바인드 파라미터
+상한을 넘지 않게 청크로 나눠 실행하되 전체를 1회 commit해 원자성을 유지한다.
 """
 
 from collections.abc import Iterator
@@ -34,13 +24,18 @@ from app.db.orm_models.stock_price import StockPrice
 _MAX_BIND_PARAMS = 30000
 
 
-def _chunks(records: list[dict], max_params: int | None = None) -> Iterator[list[dict]]:
-    """records를 INSERT 파라미터 한계(행×컬럼) 이하 청크로 분할. 호출자가 비어있지 않음을 보장.
+def _chunks(
+    records: list[dict], n_cols: int | None = None, max_params: int | None = None
+) -> Iterator[list[dict]]:
+    """records를 INSERT 파라미터 한계(행×컬럼) 이하 청크로 분할.
 
+    n_cols는 INSERT에 실제 바인딩되는 컬럼 수다. client-side default 컬럼도 바인딩되므로
+    레코드 키 수로 추정하면 과소평가돼 한계를 넘는다 — 미지정 시 레코드 키 합집합으로 추정.
     max_params는 테스트에서 작은 한계값을 주입하기 위한 시드(seam)다.
     """
     limit = _MAX_BIND_PARAMS if max_params is None else max_params
-    chunk_size = max(1, limit // len(records[0]))
+    cols = n_cols if n_cols is not None else (len({k for r in records for k in r}) or 1)
+    chunk_size = max(1, limit // cols)
     for start in range(0, len(records), chunk_size):
         yield records[start : start + chunk_size]
 
@@ -54,15 +49,15 @@ async def _upsert(
 ) -> int:
     """records를 UPSERT하고 반영(삽입+갱신) 건수를 반환. 빈 입력은 0.
 
-    충돌 시 기본은 무시(DO NOTHING)다. update_columns를 주면 해당 컬럼만 새 값으로
-    갱신(DO UPDATE)한다 — 같은 키의 산출물이 실행마다 갱신되는 테이블(news_cluster)용.
-    대량 입력은 파라미터 한계를 넘지 않도록 청크로 나눠 실행하되, 전체를 1회 commit해
-    배치 원자성을 유지한다(중간 청크 실패 시 모두 롤백).
+    충돌 시 기본은 무시(DO NOTHING). update_columns를 주면 해당 컬럼만 갱신(DO UPDATE)한다.
+    대량 입력은 청크로 나눠 실행하되 전체를 1회 commit해 원자성을 유지한다.
     """
     if not records:
         return 0
+    # client-side default 컬럼까지 바인딩될 수 있으므로 모델 전체 컬럼 수를 상한으로 잡는다
+    n_cols = len(model.__table__.columns)
     affected = 0
-    for chunk in _chunks(records):
+    for chunk in _chunks(records, n_cols=n_cols):
         stmt = pg_insert(model).values(chunk)
         if update_columns:
             stmt = stmt.on_conflict_do_update(
@@ -111,9 +106,8 @@ async def upsert_report_chunks(db: AsyncSession, records: list[dict]) -> int:
 async def upsert_news_clusters(db: AsyncSession, records: list[dict]) -> int:
     """클러스터를 (run_date, representative_news_id) 기준 UPSERT — 충돌 시 내용 갱신.
 
-    같은 날 2회 실행(09:00·15:30, 설계 00)에서 오후 런은 같은 대표 기사의 클러스터가
-    새 기사로 커질 수 있다 — DO NOTHING이면 아침의 낡은 행이 남으므로 소속·크기·중요도를
-    새 값으로 갱신한다. 같은 입력 재실행은 같은 값을 다시 쓰므로 여전히 멱등하다(01 §2).
+    같은 날 재실행 시 같은 대표 기사의 클러스터가 새 기사로 커질 수 있으므로
+    소속·크기·중요도를 새 값으로 갱신한다. 같은 입력 재실행은 멱등하다.
     """
     return await _upsert(
         db,

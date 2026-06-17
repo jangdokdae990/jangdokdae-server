@@ -1,11 +1,9 @@
-"""하이브리드 로컬 실행용 러너 — Airflow 없이 전체 파이프라인을 1회 완주한다(설계 00 §9).
+"""하이브리드 로컬 실행용 러너 — Airflow 없이 전체 파이프라인을 1회 완주한다.
 
-운영 오케스트레이션(스케줄·병렬·재시도·이력)은 Airflow DAG가 전담하고, 이 러너는 로컬·테스트
-편의(인프라 0)만 맡는 얇은 함수다 — 별도 MasterOrchestrator 객체는 두지 않는다(00 §9).
+운영 오케스트레이션은 Airflow DAG가 전담하고, 이 러너는 로컬·테스트 편의만 맡는 얇은 함수다.
 단계 간 데이터는 공유 DB 상태 핸드오프라 러너든 DAG든 동작은 동일하다.
 
-흐름: (NewsCollector ∥ CompanyCollector) → EmbeddingClusterer → [분석(06) — 미구현 TODO].
-전처리는 별도 단계가 아니라 NewsCollector 안의 인메모리 모듈이다(설계 04 §1.2).
+흐름: (NewsCollector ∥ CompanyCollector) → EmbeddingClusterer → [분석 — 미구현 TODO].
 
 사용:
     python -m services.pipeline.runner            # schedule="morning"
@@ -23,7 +21,7 @@ from services.pipeline.news_collector import NewsCollector, NewsCollectorState
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_SCHEDULE = "morning"  # CompanyCollector 정적 분기와 호환되는 일일 스케줄(03 §7.4)
+DEFAULT_SCHEDULE = "morning"  # CompanyCollector 정적 분기와 호환되는 일일 스케줄
 
 
 async def _run_news_collector(schedule: str) -> NewsCollectorState:
@@ -46,7 +44,7 @@ async def run_pipeline(schedule: str = DEFAULT_SCHEDULE) -> dict[str, object]:
     async with AsyncSessionLocal() as db:
         embed_state: EmbeddingClustererState = await EmbeddingClusterer().run(db)
 
-    # TODO: NewsAnalysisAgent(06, L2 슈퍼바이저-워커) 구현 시 연결 — embed_state.top_issues 인계
+    # TODO: NewsAnalysisAgent 구현 시 연결 — embed_state.top_issues 인계
     logger.info(
         "run_pipeline 완료 schedule=%s news=%s company=%s embed=%s",
         schedule, news_state, company_state, embed_state,

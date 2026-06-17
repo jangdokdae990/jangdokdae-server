@@ -1,19 +1,12 @@
-"""실험1 — 장독대에 적합한 임베딩 모델 12종을 동일 조건으로 비교하고 모델별로 시각화한다.
+"""임베딩 모델 12종을 동일 조건으로 비교하고 모델별로 시각화한다(비지도).
 
-설계 05 §11의 모델 확정을 위해 후보를 3종에서 12종으로 넓힌 1차(비지도) 비교다.
-12종에는 한국어 금융 도메인 특화 2종(nmixx-bge-m3·kf-deberta-multitask)이 포함된다.
 각 모델로 실제 뉴스 제목을 임베딩 → 동일 HDBSCAN 클러스터링 → 자동 지표 + t-SNE 시각화를
-output/에 남긴다. 라벨이 없어 pair_auc·ARI는 측정하지 않는다(정식 판정은 라벨 벤치마크).
-
-선정 10종 (관리형 1 + 오픈소스 9, 768/1024 혼합, 검색특화·STS·다국어 다양):
-    gemini-embedding-001 / KURE-v1 / KoE5 / arctic-embed-ko / bge-m3 / Qwen3-Embedding-0.6B /
-    multilingual-e5-large / KR-SBERT / ko-sroberta(baseline) / KoSimCSE-roberta
+output/에 남긴다. 라벨이 없어 pair_auc·ARI는 측정하지 않는다.
 
 주의:
     - e5·Qwen 계열은 query/passage 프리픽스로 성능이 오르지만, 본 비교는 모든 모델에 제목
       원문을 동일하게 넣는다 → 프리픽스 민감 모델은 약간 과소평가될 수 있다(공정성<일관성).
     - 보안상 trust_remote_code(원격 코드 실행)는 쓰지 않는다 → 표준 아키텍처 모델만 선정.
-      Qwen3는 설치된 transformers가 네이티브 지원하므로 원격 코드 없이 로드된다.
     - 실패한 모델(다운로드·인증·호환)은 SKIP하고 나머지를 계속 진행한다.
 
 사용:
@@ -64,7 +57,7 @@ OUTPUT_DIR = Path("output")
 def run_model(model_name: str, titles: list[str]) -> dict:
     """모델 하나로 임베딩→클러스터링→지표+시각화. 실패는 status=skip으로 기록 후 계속."""
     try:
-        # 표준 아키텍처 모델만 선정 → trust_remote_code 불필요(보안). 호환 안 되면 SKIP.
+        # 표준 아키텍처 모델만 선정 → trust_remote_code 불필요(보안).
         client = EmbeddingClient(model_name=model_name)
         embeddings = client.embed_matrix(titles, task_type="CLUSTERING")
     except Exception as e:

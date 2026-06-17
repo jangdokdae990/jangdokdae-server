@@ -14,6 +14,10 @@ x-airflow-common: &airflow-common
     dockerfile: Dockerfile
   environment: &airflow-common-env
     AIRFLOW__CORE__EXECUTOR: LocalExecutor
+    # Task SDK supervisor가 task 상태를 보고할 Execution API 주소. 미설정 시 기본값이
+    # API Base URL(localhost) 상대라, scheduler 컨테이너에서 붙으면 Connection refused →
+    # task가 시작 직후 SIGKILL된다. 별도 api-server 컨테이너 주소로 명시한다.
+    AIRFLOW__CORE__EXECUTION_API_SERVER_URL: http://airflow-apiserver:8080/execution/
     AIRFLOW__CORE__DAGS_FOLDER: /opt/jangdokdae/dags
     AIRFLOW__CORE__LOAD_EXAMPLES: "false"
     AIRFLOW__CORE__DEFAULT_TIMEZONE: Asia/Seoul
