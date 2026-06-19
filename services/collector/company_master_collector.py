@@ -140,6 +140,11 @@ async def sync_company_master(db: AsyncSession) -> dict[str, int]:
     # GICS 섹터 코드 → sector_id (KRX 업종명 매핑 결과를 FK로 변환)
     sector_rows = (await db.execute(select(Sector.id, Sector.gics_code))).all()
     gics_to_sector_id = {gics: sid for sid, gics in sector_rows}
+    if not gics_to_sector_id:
+        # sectors 미시드 → 아래 매핑이 전부 NULL이 된다. fail-fast 대신 경보로 끌어올린다.
+        logger.warning(
+            "sectors 테이블이 비어 있음 — 섹터 시드 누락 의심, 모든 종목이 sector_id=NULL로 적재됨"
+        )
 
     # 신규 레코드 upsert (기존은 market·corp_code·sector_id 갱신, name_ko·is_active는 보존)
     # PyKRX 업종명 → GICS 섹터(KRX_SECTOR_TO_GICS) → sector_id. 미매핑/조회실패는 NULL.
@@ -160,7 +165,13 @@ async def sync_company_master(db: AsyncSession) -> dict[str, int]:
             "aliases": [],
             "is_active": False,  # 신규 종목은 기본 비활성화
         })
-    logger.info("섹터 매핑: %d/%d (KRX 업종명 → GICS sector_id)", mapped, len(records))
+    if records and mapped == 0:
+        # 종목은 있는데 매핑이 0건 — 시드 누락·KRX 업종명 변경 등 데이터 불일치 신호.
+        logger.warning(
+            "섹터 매핑 0건 — 시드 누락 또는 KRX 업종명↔GICS 불일치 의심 (records=%d)", len(records)
+        )
+    else:
+        logger.info("섹터 매핑: %d/%d (KRX 업종명 → GICS sector_id)", mapped, len(records))
 
     if not records:
         return {"total": 0, "existing": existing}
