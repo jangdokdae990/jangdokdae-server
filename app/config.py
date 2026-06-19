@@ -32,7 +32,7 @@ class Settings(BaseSettings):
     google_application_credentials: str = ""
     google_cloud_project: str = ""  # (.env: GOOGLE_CLOUD_PROJECT)
     google_cloud_location: str = "asia-northeast3"  # (.env: GOOGLE_CLOUD_LOCATION)
-    vertex_model: str = "gemini-2.5-flash"  # LLM 분석용 (.env: VERTEX_MODEL)
+    vertex_model: str = "gemini-3.5-flash"  # LLM 분석용 (.env: VERTEX_MODEL)
 
     @property
     def async_url(self) -> str:
