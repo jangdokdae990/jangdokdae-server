@@ -112,6 +112,31 @@ async def test_persistent_error_isolated_to_failed_feeds(install_transport):
     assert failed == ["example_feed"]
 
 
+def test_extract_guid_returns_feed_guid():
+    """피드가 <guid>(feedparser entry.id)를 주면 그대로 수집-시점 중복키로 쓴다."""
+    assert RSSCollector._extract_guid({"id": " urn:news:123 "}) == "urn:news:123"
+
+
+def test_extract_guid_none_when_absent_or_blank():
+    """GUID가 없거나 빈 값이면 None → 전처리가 정규화 URL로 폴백한다."""
+    assert RSSCollector._extract_guid({}) is None
+    assert RSSCollector._extract_guid({"id": "   "}) is None
+
+
+async def test_collected_guid_propagates_to_record(install_transport):
+    """수집한 GUID가 CollectedNews.to_record()까지 전달된다."""
+    rss = """<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0"><channel><title>예시</title>
+<item><title>뉴스</title><link>https://news.example.com/1</link>
+<guid>urn:news:42</guid></item></channel></rss>"""
+    install_transport(lambda request: httpx.Response(200, text=rss))
+
+    collected, _failed = await RSSCollector(feeds=[FEED]).collect()
+
+    assert collected[0].guid == "urn:news:42"
+    assert collected[0].to_record()["guid"] == "urn:news:42"
+
+
 def test_parse_published_domestic_naive_is_kst():
     """오프셋 없는 국내 피드(einfomax 형식) 시각은 KST로 해석 — 9h 드리프트 없음."""
     dt = RSSCollector._parse_published({"published": "2026-06-17 10:40:00"}, FEED)

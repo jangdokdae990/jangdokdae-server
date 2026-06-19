@@ -151,10 +151,15 @@ def run_preprocessing(
     stats = PreprocessStats(total=len(records))
 
     # Step 1·2. 정규화 (HTML 제목 정제 + URL 트래킹 파라미터 제거)
+    # guid 폴백: 피드 GUID가 없으면 정규화 URL을 수집-시점 중복키로 쓴다(설계 02 §7).
+    # URL 정규화 후에 폴백을 채워 트래킹 파라미터가 키에 섞이지 않게 한다.
     items: list[dict] = []
     for r in records:
         title, url = normalize(r["title"], r["url"])
-        items.append({**r, "title": title, "url": url, "is_filtered": False})
+        items.append({
+            **r, "title": title, "url": url,
+            "guid": r.get("guid") or url, "is_filtered": False,
+        })
 
     # Step 3. 날짜 필터 — 발행일 없으면 수집 시각(now)으로 대체
     for item in items:

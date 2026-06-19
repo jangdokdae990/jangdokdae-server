@@ -244,3 +244,15 @@ class TestRunPreprocessing:
         assert result[0]["rss_source"] == "hankyung"
         assert result[0]["news_source"] == "한국경제"
         assert result[0]["published_at"] == NOW
+
+    def test_guid_kept_when_feed_provides(self):
+        # 피드 제공 GUID는 그대로 수집-시점 중복키로 보존된다
+        records = [{**_record("삼성전자 실적", "https://a.com/1"), "guid": "feed-guid-1"}]
+        result, _stats = run_preprocessing(records, now=NOW)
+        assert result[0]["guid"] == "feed-guid-1"
+
+    def test_guid_falls_back_to_normalized_url(self):
+        # 피드 GUID가 없으면 정규화 URL로 폴백 — 트래킹 파라미터가 키에 섞이지 않는다
+        records = [_record("삼성전자 실적", "https://a.com/1?utm_source=naver")]
+        result, _stats = run_preprocessing(records, now=NOW)
+        assert result[0]["guid"] == "https://a.com/1"

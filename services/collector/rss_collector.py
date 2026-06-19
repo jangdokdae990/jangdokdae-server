@@ -1,4 +1,4 @@
-"""RSS 피드 뉴스 수집기 — 16개 피드(국내 증권 13 + investing.com 3)를 병렬 폴링.
+"""RSS 피드 뉴스 수집기 — 국내 증권 섹션 피드 13개를 병렬 폴링.
 
 기사 제목·URL·출처·발행일만 수집한다(본문·snippet은 저작권 문제로 저장하지 않음).
 Semaphore로 동시성을 제한하고 피드 단위로 에러를 격리한다. 발행일은 KST naive
@@ -33,15 +33,18 @@ class CollectedNews:
     rss_source: str            # 어느 RSS 피드에서 수집했는지 (피드 식별자)
     news_source: str           # 기사 본문의 실제 출처(언론사)
     published_at: datetime | None   # 발행 시각 (KST). 피드에 없으면 None
+    # 피드 제공 GUID(<guid>). 없으면 None → 전처리에서 정규화 URL로 폴백(수집-시점 중복키).
+    guid: str | None = None
 
     def to_record(self) -> dict[str, str | datetime | None]:
-        # News 컬럼 입력 형식
+        # News 컬럼 입력 형식. guid 폴백(None→정규화 URL)은 전처리에서 채운다.
         return {
             "title": self.title,
             "url": self.url,
             "rss_source": self.rss_source,
             "news_source": self.news_source,
             "published_at": self.published_at,
+            "guid": self.guid,
         }
 
 
@@ -118,6 +121,7 @@ class RSSCollector:
                     rss_source=feed.rss_source,
                     news_source=self._extract_source(entry, feed),
                     published_at=self._parse_published(entry, feed),
+                    guid=self._extract_guid(entry),
                 )
             )
         if not collected:
@@ -127,6 +131,18 @@ class RSSCollector:
                 "RSS 피드 0건 수집 — 포맷 변경·폐쇄 의심 rss_source=%s", feed.rss_source
             )
         return collected
+
+    @staticmethod
+    def _extract_guid(entry: feedparser.FeedParserDict) -> str | None:
+        """피드 제공 GUID(<guid>/<id>)를 반환한다. 없거나 빈 값이면 None.
+
+        feedparser는 <guid>를 entry.id로 매핑한다. 비어 있으면 None을 돌려보내
+        전처리가 정규화 URL로 폴백하게 한다(수집-시점 정확 중복키 — 설계 02 §7).
+        """
+        guid = entry.get("id")
+        if isinstance(guid, str) and guid.strip():
+            return guid.strip()
+        return None
 
     @staticmethod
     def _extract_source(entry: feedparser.FeedParserDict, feed: FeedSource) -> str:
@@ -147,7 +163,7 @@ class RSSCollector:
         """발행일을 한국 시간(KST naive) datetime으로 반환. 없거나 파싱 실패 시 None.
 
         원본 문자열을 직접 파싱해 명시 오프셋(+0900 등)을 그대로 존중하고, 오프셋이 없는
-        시각은 피드 기준 타임존(feed.tz: 국내=KST·investing=UTC)으로 해석한다. feedparser의
+        시각은 피드 기준 타임존(feed.tz, 국내 섹션 피드는 모두 KST)으로 해석한다. feedparser의
         struct_time은 오프셋 없는 입력을 UTC로 가정해버려 국내 피드(예: einfomax)의 KST 시각이
         9시간 밀리므로, 문자열 파싱을 우선하고 struct_time은 폴백으로만 쓴다.
         """

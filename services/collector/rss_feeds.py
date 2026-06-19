@@ -1,10 +1,17 @@
-"""RSS 피드 목록 — 수집 대상 피드의 식별자·URL·언론사 상수 정의.
+"""RSS 피드 레지스트리 로더 — YAML 정본(config/feeds.yaml)을 읽어 FeedSource로 노출.
 
-국내 증권 RSS 13개(DOMESTIC_SECURITIES_RSS) + investing.com 3개(GLOBAL_INVESTING_RSS)를
-합쳐 ALL_FEEDS로 노출한다. 피드 추가·제거는 이 파일의 리스트만 수정하면 된다.
+피드 목록의 정본은 코드 상수가 아니라 YAML 설정 파일이다(설계 02 §4) — 피드 추가·비활성화를
+코드 배포 없이 운영 중 처리하기 위함. 이 모듈은 YAML을 FeedSource 리스트로 로드하고
+active=false 피드를 제외한 ALL_FEEDS를 노출한다(공개 API는 종전과 동일).
 """
 
 from dataclasses import dataclass
+from pathlib import Path
+
+import yaml
+
+# 레지스트리 정본 — 루트 config/feeds.yaml. 이 파일 기준 상대 경로로 찾는다.
+FEEDS_YAML = Path(__file__).resolve().parents[2] / "config" / "feeds.yaml"
 
 
 @dataclass(frozen=True)
@@ -15,50 +22,35 @@ class FeedSource:
     rss_source: str   # 피드 식별자. 예: "hankyung_finance"
     # 기사에 <source>가 없을 때 news_source 폴백으로 쓰는 언론사명. 예: "한국경제"
     publisher: str
-    # 오프셋 없는 발행시각을 해석할 기준 타임존. 국내 피드는 KST(기본), investing은 UTC.
+    # 권역(korea/us/global, 선택) — 분류·필터용 메타. 미지정 시 korea.
+    region: str = "korea"
+    # 오프셋 없는 발행시각을 해석할 기준 타임존. 국내 섹션 피드는 모두 KST(기본).
     # 예: einfomax는 "2026-06-17 10:40:00"처럼 오프셋 없이 KST를 주므로 UTC로 보면 9h 밀린다.
     tz: str = "Asia/Seoul"
 
 
-DOMESTIC_SECURITIES_RSS: list[FeedSource] = [
-    FeedSource("https://www.hankyung.com/feed/finance", "hankyung_finance", "한국경제"),
-    FeedSource("https://www.mk.co.kr/rss/50200011/", "mk_securities", "매일경제"),
-    FeedSource("https://mbnmoney.mbn.co.kr/rss/news/stock", "mbn_stock", "매일경제TV"),
-    FeedSource("https://news.einfomax.co.kr/rss/S1N2.xml", "einfomax", "연합인포맥스"),
-    FeedSource(
-        "https://www.thevaluenews.co.kr/rss_view.php?code=m6481nr",
-        "thevaluenews_securities",
-        "더밸류뉴스",
-    ),
-    FeedSource(
-        "https://www.thevaluenews.co.kr/rss_view.php?code=m65gpg7",
-        "thevaluenews_company",
-        "더밸류뉴스",
-    ),
-    FeedSource("https://api.newswire.co.kr/rss/industry/203", "newswire", "뉴스와이어"),
-    FeedSource("https://view.asiae.co.kr/rss/stock.htm", "asiae_stock", "아시아경제"),
-    FeedSource("https://www.sedaily.com/rss/finance", "sedaily_finance", "서울경제"),
-    FeedSource("https://www.newstomato.com/rss/?cate=12", "newstomato", "뉴스토마토"),
-    FeedSource("http://rss.edaily.co.kr/stock_news.xml", "edaily_stock", "이데일리"),
-    FeedSource(
-        "https://www.fnnews.com/rss/r20/fn_realnews_stock.xml",
-        "fnnews_stock",
-        "파이낸셜뉴스",
-    ),
-    FeedSource("http://rss.newspim.com/news/category/105", "newspim", "뉴스핌"),
-]
+def load_feeds(path: Path = FEEDS_YAML, *, active_only: bool = True) -> list[FeedSource]:
+    """YAML 레지스트리에서 피드를 로드한다. active_only면 active=false 피드를 제외한다.
 
-GLOBAL_INVESTING_RSS: list[FeedSource] = [
-    # investing은 오프셋 없는 발행시각을 UTC로 준다(국내 피드와 달리 tz=UTC).
-    FeedSource(
-        "https://kr.investing.com/rss/news_1.rss", "investing_fx", "investing.com", tz="UTC"
-    ),
-    FeedSource(
-        "https://kr.investing.com/rss/news_25.rss", "investing_stock", "investing.com", tz="UTC"
-    ),
-    FeedSource(
-        "https://kr.investing.com/rss/news_95.rss", "investing_economy", "investing.com", tz="UTC"
-    ),
-]
+    필수 키(rss_source/publisher/url)가 없으면 KeyError로 즉시 실패한다 — 잘못된 레지스트리를
+    조용히 건너뛰면 수집량 급감을 놓친다. region/tz/active는 기본값을 적용한다.
+    """
+    raw = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+    feeds: list[FeedSource] = []
+    for entry in raw.get("feeds", []):
+        if active_only and not entry.get("active", True):
+            continue
+        feeds.append(
+            FeedSource(
+                url=entry["url"],
+                rss_source=entry["rss_source"],
+                publisher=entry["publisher"],
+                region=entry.get("region", "korea"),
+                tz=entry.get("tz", "Asia/Seoul"),
+            )
+        )
+    return feeds
 
-ALL_FEEDS: list[FeedSource] = DOMESTIC_SECURITIES_RSS + GLOBAL_INVESTING_RSS
+
+# 모듈 임포트 시 1회 로드 — 활성 피드만. (공개 API: rss_collector가 ALL_FEEDS를 임포트)
+ALL_FEEDS: list[FeedSource] = load_feeds()
