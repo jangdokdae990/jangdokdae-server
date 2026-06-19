@@ -1,6 +1,6 @@
 # 기업 데이터 수집 기획서
 
-> **작성자** Kim minkyoung · **작성일** 2026-05-28 · **개정** 2026-06-08 구현 반영 / 2026-06-12 핵심 압축
+> **작성자** Kim minkyoung · **작성일** 2026-05-28 · **개정** 2026-06-08 구현 반영 / 2026-06-12 핵심 압축 / 2026-06-18 뉴스 재설계 반영 — 기업 수집 영향 없음
 >
 > **범위** 기업 데이터 수집 → DB 적재 / on-demand 조회 → RAG 소스 준비
 >
@@ -25,7 +25,7 @@
 
 ## 1. 목적
 
-기업 데이터의 핵심 목적은 분석 파이프라인 `ImpactAnalysisChain`에 **기업 컨텍스트(`related_companies`)를 주입**하는 것 — EntityExtractionChain이 뉴스에서 기업명을 추출하면, 해당 기업의 사업보고서·재무를 pgvector로 검색해 문자열로 구성한다.
+기업 데이터의 핵심 목적은 분석 파이프라인 `ImpactAnalysisChain`에 **기업 컨텍스트(`related_companies`)를 주입**하는 것이다. EntityExtractionChain이 뉴스에서 기업명을 추출하면, 해당 기업의 사업보고서·재무를 pgvector로 검색해 문자열로 구성한다.
 
 | 데이터 | 출처 | 적재/조회 | 용도 |
 |--------|------|----------|----------|
@@ -38,13 +38,14 @@
 | 거시지표 (금리·CPI·M2) | 한국은행 ECOS | 적재 (`market_indicators`) | 거시 이슈 컨텍스트 |
 | 해외 주가·시총·외국인 | yfinance·pykrx | 미구현 (Phase 4 확장) | 보조 컨텍스트 |
 
-> **on-demand의 논리**: 주가·환율은 임베딩 대상이 아닌 프롬프트 주입용 보조 컨텍스트고, 분석 대상은 소수 related company뿐이며, API가 기간 파라미터로 과거를 언제든 재조회할 수 있다 → 상시 적재 실익 없음. 분석에 쓴 값은 산출물에 스냅샷으로 보존(재현성).
+> **on-demand의 논리**: 주가·환율은 임베딩 대상이 아니라 프롬프트 주입용 보조 컨텍스트다. 분석 대상도 소수 related company뿐이고, API가 기간 파라미터로 과거를 언제든 재조회할 수 있다. 따라서 상시 적재의 실익이 없다. 다만 분석에 사용한 값은 재현성을 위해 산출물에 스냅샷으로 보존한다.
 
 ---
 
 ## 2. RAG · pgvector 필요성
 
 - **pgvector**: Neon이 기본 지원 — 별도 벡터 DB(Pinecone 등) 없이 관계형+벡터를 한 DB로. 용도: 유사 중복 제거·클러스터링·RAG 검색·과거 이슈 검색.
+  - 단, 뉴스 임베딩·클러스터링(유사 중복 제거·클러스터링)은 재설계 중 — 임베딩 모델·클러스터링 방식 모두 미확정([05](./05-embedding-clustering-design.md) 참조). 기업 데이터 RAG·`ReportChunk` 임베딩은 이 변경과 무관하게 유지(→ [05 §7](./05-embedding-clustering-design.md#7-rag-소스-준비--reportchunk-임베딩)).
 - **RAG**: 뉴스만으로는 영향도 판단 근거가 빈약하다. 예: "삼성전자 감산 발표" + RAG(반도체 매출 비중 60%, 최근 영업이익 -4조) → 구체적이고 주린이가 이해할 수 있는 분석.
 - **흐름**: 기업명 추출(NER) → 사업보고서 청크 pgvector 검색 → `related_companies`로 ImpactAnalysisChain 주입.
 - **구현**: langchain PGVector 대신 **raw pgvector + ORM**(`app/llm/rag.py`의 `get_company_context`) — 의존성 추가 없이 EmbeddingClient(비대칭 task_type)와 일관 (→ [05 §7](./05-embedding-clustering-design.md#7-rag-소스-준비--reportchunk-임베딩)).
@@ -61,7 +62,7 @@
 
 ### 4.1 DART REST API — 공시 수집
 
-`list.json`으로 (기업 × 공시유형 A/B) 병렬 수집, `total_page` 페이지네이션, `status=013`(없음)은 정상 종료. **메타데이터만 저장하고 `content=NULL`** — 본문은 분석 대상으로 선정된 공시만 `document.xml`로 fetch(전량 선저장은 낭비). DART는 공공 데이터라 본문 저장에 저작권 리스크 없음(뉴스와 다른 점). 유형: `A`(정기보고서 → RAG), `B`(주요사항 → 분석 직접 input). 구현: [`dart_collector.py`](../../services/collector/dart_collector.py).
+`list.json`으로 (기업 × 공시유형 A/B)를 병렬 수집한다. `total_page` 기준으로 페이지네이션하고, `status=013`(없음)은 정상 종료로 처리한다. **메타데이터만 저장하고 `content=NULL`로 둔다** — 본문은 분석 대상으로 선정된 공시만 `document.xml`로 fetch한다(전량 선저장은 낭비). DART는 공공 데이터라 본문 저장에 저작권 리스크가 없다(뉴스와 다른 점). 공시 유형은 `A`(정기보고서 → RAG)와 `B`(주요사항 → 분석 직접 input)로 나뉜다. 구현: [`dart_collector.py`](../../services/collector/dart_collector.py).
 
 ### 4.2 DART 구조화 재무 API — 재무제표
 
@@ -129,7 +130,7 @@ MVP는 관심 종목 + 코스피200 대형주, Phase 4에서 전 종목(~2,500�
 
 ### 5.3 Backfill vs Incremental — 적재 대상에만
 
-`scripts/`(최초 1회 수동: 거시 5년 ~5분, 공시·재무·보고서 N년 ~30분) ↔ DAG(주기 실행)를 분리 — 일회성 코드와 주기 코드가 섞이면 재실행 사고 위험. **뉴스에는 이 분리가 없다**: RSS는 최근 N건만 노출해 과거 일괄 수집 소스 자체가 없으므로 incremental만 존재.
+`scripts/`(최초 1회 수동: 거시 5년 ~5분, 공시·재무·보고서 N년 ~30분)와 DAG(주기 실행)를 분리한다. 일회성 코드와 주기 코드가 섞이면 재실행 사고 위험이 있기 때문이다. **뉴스에는 이 분리가 없다.** RSS는 최근 N건만 노출해 과거 일괄 수집 소스 자체가 없으므로 incremental만 존재한다.
 
 ### 5.4 사업보고서 청킹 전략
 
@@ -172,16 +173,17 @@ CompanyCollector는 Airflow가 실행하는 단계 컴포넌트 — 단계 간 �
 
 ### 7.3~7.4 CompanyCollector 구조와 흐름
 
-`schedule` 정적 분기 — 구현: [`services/pipeline/company_collector.py`](../../services/pipeline/company_collector.py) ✅:
+`schedule` 값에 따라 정적으로 분기한다. 구현은 [`services/pipeline/company_collector.py`](../../services/pipeline/company_collector.py)(완료).
 
-```
-run(schedule)
- ├─ "morning"/"afternoon" → DARTCollector(전일~당일) → disclosures (content=NULL)
- ├─ "macro"               → MacroCollector.collect_ecos(이번 달) → market_indicators
- └─ "quarterly"           → Financial ∥ Report (gather) → financial_statements · report_chunks(embedding=NULL)
+```mermaid
+flowchart TD
+    R["run(schedule)"]
+    R -->|"morning / afternoon"| M["DARTCollector(전일~당일)<br/>→ disclosures (content=NULL)"]
+    R -->|"macro"| C["MacroCollector.collect_ecos(이번 달)<br/>→ market_indicators"]
+    R -->|"quarterly"| Q["Financial ∥ Report (gather)<br/>→ financial_statements · report_chunks(embedding=NULL)"]
 ```
 
-수집기 모듈(`services/collector/*`) 전부 ✅ 구현, backfill 스크립트(`scripts/backfill_*.py`) ✅ 실행 완료. 주가는 어느 schedule에도 적재 노드가 없다.
+수집기 모듈(`services/collector/*`)은 전부 구현 완료이고, backfill 스크립트(`scripts/backfill_*.py`)도 실행 완료다. 주가는 어느 schedule에도 적재 노드가 없다.
 
 ### 7.5 각 모듈 책임
 
@@ -222,15 +224,15 @@ run(schedule)
 | DART ([opendart.fss.or.kr](https://opendart.fss.or.kr)) | 무료 | `DART_API_KEY` |
 | 한국은행 ECOS ([ecos.bok.or.kr](https://ecos.bok.or.kr/api/)) | 무료 | `ECOS_API_KEY` |
 
-키 불필요: FinanceDataReader ✅ · pykrx ✅(섹터·마켓 동기화에 사용) · yfinance ⏳(Phase 4). **dart-fss 미사용**(§4.2).
+키 불필요: FinanceDataReader(사용) · pykrx(사용, 섹터·마켓 동기화) · yfinance(예정, Phase 4). **dart-fss 미사용**(§4.2).
 
 ---
 
 ## 10. 구현 로드맵
 
 | Phase | 내용 | 상태 |
-|:---:|------|:---:|
-| 1 | 수집기 7종 + save_tool + ORM 6모델 + API 키 | ✅ |
-| 2 | CompanyCollector 진입점 + Backfill 스크립트 | ✅ (DAG만 ⬜ → [00 §7](./00-workflow-airflow.md#7-dag-구성)) |
-| 3 | 사업보고서 RAG — pgvector·ReportEmbedder·rag.py | ✅ (2026-06-11, raw pgvector 방식) |
-| 4 | 확장 — 전종목 유니버스, 주가 적재 전환, pykrx 시총·외국인, yfinance, 공시 30분 감시 | ⬜ |
+| :---: | ------ | :--- |
+| 1 | 수집기 7종 + save_tool + ORM 6모델 + API 키 | 완료 |
+| 2 | CompanyCollector 진입점 + Backfill 스크립트 | 완료 (DAG만 예정 → [00 §7](./00-workflow-airflow.md#7-dag-구성)) |
+| 3 | 사업보고서 RAG — pgvector·ReportEmbedder·rag.py | 완료 (2026-06-11, raw pgvector 방식) |
+| 4 | 확장 — 전종목 유니버스, 주가 적재 전환, pykrx 시총·외국인, yfinance, 공시 30분 감시 | 예정 |

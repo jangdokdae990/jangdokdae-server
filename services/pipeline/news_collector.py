@@ -25,7 +25,7 @@ class NewsCollectorState(TypedDict):
     데이터 자체가 아니라 카운트와 실패 신호만 담는다(실제 데이터는 공유 DB 상태 컬럼으로 핸드오프).
     """
 
-    schedule: str            # 실행 트리거 식별자 (예: "morning" / "afternoon")
+    schedule: str            # 장 운영 시간대 라벨 (premarket/morning/afternoon/afterhours)
     collected: int           # RSS에서 수집한 원시 기사 수
     kept: int                # 전처리 통과(분석 대상) 수 — is_filtered=False
     saved: int               # upsert_news가 새로 삽입한 수 (url 중복은 DO NOTHING)

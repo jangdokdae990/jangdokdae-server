@@ -15,6 +15,9 @@ class FeedSource:
     rss_source: str   # 피드 식별자. 예: "hankyung_finance"
     # 기사에 <source>가 없을 때 news_source 폴백으로 쓰는 언론사명. 예: "한국경제"
     publisher: str
+    # 오프셋 없는 발행시각을 해석할 기준 타임존. 국내 피드는 KST(기본), investing은 UTC.
+    # 예: einfomax는 "2026-06-17 10:40:00"처럼 오프셋 없이 KST를 주므로 UTC로 보면 9h 밀린다.
+    tz: str = "Asia/Seoul"
 
 
 DOMESTIC_SECURITIES_RSS: list[FeedSource] = [
@@ -46,9 +49,16 @@ DOMESTIC_SECURITIES_RSS: list[FeedSource] = [
 ]
 
 GLOBAL_INVESTING_RSS: list[FeedSource] = [
-    FeedSource("https://kr.investing.com/rss/news_1.rss", "investing_fx", "investing.com"),
-    FeedSource("https://kr.investing.com/rss/news_25.rss", "investing_stock", "investing.com"),
-    FeedSource("https://kr.investing.com/rss/news_95.rss", "investing_economy", "investing.com"),
+    # investing은 오프셋 없는 발행시각을 UTC로 준다(국내 피드와 달리 tz=UTC).
+    FeedSource(
+        "https://kr.investing.com/rss/news_1.rss", "investing_fx", "investing.com", tz="UTC"
+    ),
+    FeedSource(
+        "https://kr.investing.com/rss/news_25.rss", "investing_stock", "investing.com", tz="UTC"
+    ),
+    FeedSource(
+        "https://kr.investing.com/rss/news_95.rss", "investing_economy", "investing.com", tz="UTC"
+    ),
 ]
 
 ALL_FEEDS: list[FeedSource] = DOMESTIC_SECURITIES_RSS + GLOBAL_INVESTING_RSS
