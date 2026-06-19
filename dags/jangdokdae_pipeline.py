@@ -39,9 +39,9 @@ def _collect_news() -> None:
     sys.path.insert(0, "/opt/jangdokdae")
     from app.db.base import AsyncSessionLocal
     from services.pipeline.news_collector import NewsCollector
-    from utils.dates import market_session, now_kst
+    from utils.dates import current_market_session
 
-    schedule = market_session(now_kst())
+    schedule = current_market_session()
 
     async def _run() -> None:
         async with AsyncSessionLocal() as db:
@@ -56,9 +56,9 @@ def _collect_company() -> None:
 
     sys.path.insert(0, "/opt/jangdokdae")
     from services.pipeline.company_collector import CompanyCollector
-    from utils.dates import market_session, now_kst
+    from utils.dates import current_market_session
 
-    schedule = market_session(now_kst())
+    schedule = current_market_session()
 
     asyncio.run(CompanyCollector().run(schedule))
 
