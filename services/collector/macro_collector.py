@@ -17,6 +17,7 @@ import httpx
 
 from app.config import settings
 from services.collector.tools.redact import redact_secrets
+from services.collector.tools.with_retry import with_retry
 
 logger = logging.getLogger(__name__)
 
@@ -140,9 +141,12 @@ class MacroCollector:
             indicators.extend(batch)
         return indicators
 
+    @with_retry(max_attempts=2, retry_on=httpx.TransportError)
     async def _fetch_ecos(
         self, client: httpx.AsyncClient, ind: EcosIndicator, bgn_ym: str, end_ym: str
     ) -> list[CollectedIndicator]:
+        # 일시 네트워크 오류(TransportError)만 1회 더 시도해 흡수한다 —
+        # 4xx/5xx·응답 비정상은 전파하여 Airflow Task 재시도/격리에 맡긴다.
         url = (
             f"{ECOS_BASE_URL}/StatisticSearch/{settings.ecos_api_key}/json/kr/1/{ECOS_ROW_COUNT}/"
             f"{ind.stat_code}/{ind.cycle}/{bgn_ym}/{end_ym}/{ind.item_code}"

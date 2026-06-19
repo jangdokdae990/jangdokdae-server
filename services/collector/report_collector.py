@@ -16,6 +16,7 @@ import httpx
 from app.config import settings
 from services.collector.stock_symbols import StockSymbol
 from services.collector.tools.redact import redact_secrets
+from services.collector.tools.with_retry import with_retry
 from services.preprocessor.company_preprocessor import parse_report_sections
 
 logger = logging.getLogger(__name__)
@@ -106,10 +107,13 @@ class ReportCollector:
                 )
         return chunks
 
+    @with_retry(max_attempts=2, retry_on=httpx.TransportError)
     async def _find_annual_report(
         self, client: httpx.AsyncClient, corp_code: str, bsns_year: int
     ) -> str | None:
-        """해당 기업·연도의 사업보고서(11011) rcept_no를 반환. 없으면 None."""
+        """해당 기업·연도의 사업보고서(11011) rcept_no를 반환. 없으면 None.
+
+        일시 네트워크 오류(TransportError)만 1회 더 시도해 흡수한다."""
         bgn_de = f"{bsns_year}0101"
         end_de = f"{bsns_year + 1}0630"  # 사업보고서는 다음 해 3월까지 제출
         params: dict[str, str | int] = {
@@ -138,10 +142,13 @@ class ReportCollector:
         latest = max(candidates, key=lambda it: it.get("rcept_dt") or "")
         return str(latest["rcept_no"])
 
+    @with_retry(max_attempts=2, retry_on=httpx.TransportError)
     async def _fetch_document_xml(
         self, client: httpx.AsyncClient, rcept_no: str
     ) -> str | None:
-        """DART document.xml API로 ZIP을 다운로드해 XML 텍스트를 반환."""
+        """DART document.xml API로 ZIP을 다운로드해 XML 텍스트를 반환.
+
+        일시 네트워크 오류(TransportError)만 1회 더 시도해 흡수한다."""
         params = {"crtfc_key": settings.opendart_api_key, "rcept_no": rcept_no}
         response = await client.get(DART_DOC_URL, params=params)
         response.raise_for_status()

@@ -26,6 +26,7 @@ import httpx
 from app.config import settings
 from services.collector.stock_symbols import ALL_STOCKS, StockSymbol
 from services.collector.tools.redact import redact_secrets
+from services.collector.tools.with_retry import with_retry
 
 logger = logging.getLogger(__name__)
 
@@ -111,9 +112,7 @@ class DARTCollector:
                 "page_no": page,
                 "page_count": PAGE_COUNT,
             }
-            response = await client.get(DART_LIST_URL, params=params)
-            response.raise_for_status()
-            data = response.json()
+            data = await self._get_page(client, params)
             status = data.get("status")
             if status == "013":  # 조회된 데이터 없음 (정상)
                 break
@@ -135,6 +134,17 @@ class DARTCollector:
                 break
             page += 1
         return results
+
+    @with_retry(max_attempts=2, retry_on=httpx.TransportError)
+    async def _get_page(
+        self, client: httpx.AsyncClient, params: dict[str, str | int]
+    ) -> dict:
+        """list.json 한 페이지를 조회. 일시 네트워크 오류만 1회 더 시도해 흡수한다 —
+        4xx/5xx·status 비정상은 전파하여 Airflow Task 재시도/격리에 맡긴다."""
+        response = await client.get(DART_LIST_URL, params=params)
+        response.raise_for_status()
+        data: dict = response.json()
+        return data
 
     @staticmethod
     def _to_disclosure(
