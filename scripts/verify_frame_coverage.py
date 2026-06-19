@@ -6,7 +6,7 @@
 "7개로 충분한가 / 새 분류가 필요한가"를 근거와 함께 집계·출력한다(DB 미변경, 판정만).
 
 사용:
-    GOOGLE_CLOUD_PROJECT=project-4e66a193-e7ab-4eb7-b95 GOOGLE_APPLICATION_CREDENTIALS= \
+    GOOGLE_CLOUD_PROJECT=<vertex-project> GOOGLE_APPLICATION_CREDENTIALS= \
       uv run python -m scripts.verify_frame_coverage
 """
 

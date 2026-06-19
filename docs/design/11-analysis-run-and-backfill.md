@@ -113,7 +113,7 @@ uv run python -m scripts.run_analysis --min-size 1 --limit 0 --rerun
 
 - **프로젝트**: 팀 프로젝트(`kt-cloud-jangdokdae`)는 개인 계정에 Vertex 권한이 없고, **SA 키 생성은 조직 정책
   (`iam.disableServiceAccountKeyCreation`)으로 차단**된다(본인이 못 풂). → 로컬 테스트는 **사용자 소유 프로젝트**
-  (`project-4e66a193-…`, Vertex API·결제 활성)로 돌린다.
+  (`개인 Vertex 프로젝트`, Vertex API·결제 활성)로 돌린다.
 - **설정**: `gcloud auth application-default set-quota-project <내-프로젝트>` 후 실행 시
   `GOOGLE_CLOUD_PROJECT=<내-프로젝트>`로 덮어쓴다.
 - **키 파일 분기 회피**: `.env`의 `GOOGLE_APPLICATION_CREDENTIALS`가 없는 파일을 가리키면 [`config.py`](../../app/config.py)가
@@ -121,7 +121,7 @@ uv run python -m scripts.run_analysis --min-size 1 --limit 0 --rerun
   덮어쓰면 키 분기를 건너뛰고 ADC로 폴백한다.
 
 ```bash
-GOOGLE_CLOUD_PROJECT=project-4e66a193-e7ab-4eb7-b95 GOOGLE_APPLICATION_CREDENTIALS= \
+GOOGLE_CLOUD_PROJECT=<vertex-project> GOOGLE_APPLICATION_CREDENTIALS= \
   uv run python -m scripts.run_analysis --min-size 2 --limit 0
 ```
 - 리전: `GOOGLE_CLOUD_LOCATION=asia-northeast3`에서 모델 미제공 에러 시 `us-central1`로 덮어써 재시도.

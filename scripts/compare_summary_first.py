@@ -6,7 +6,7 @@ Variant B(요약-우선)는 본문을 요약해 Issue.body에 넣어 classify→
 프로덕션 코드·DB 미변경. 결과는 콘솔 + /tmp/summary_first_compare.json.
 
 사용:
-    GOOGLE_CLOUD_PROJECT=project-4e66a193-e7ab-4eb7-b95 GOOGLE_APPLICATION_CREDENTIALS= \
+    GOOGLE_CLOUD_PROJECT=<vertex-project> GOOGLE_APPLICATION_CREDENTIALS= \
       uv run python -m scripts.compare_summary_first --limit 5
 """
 
