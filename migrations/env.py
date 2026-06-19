@@ -19,6 +19,8 @@ from app.db.orm_models import (  # noqa: F401
     disclosure,
     financial_statement,
     issue_docent,
+    industry,
+    industry_group,
     market_indicator,
     news,
     news_analysis,

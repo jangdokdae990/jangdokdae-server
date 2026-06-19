@@ -6,7 +6,7 @@
 (.env/DB 없이 autogenerate 불가한 환경) — 스키마는 app/db/orm_models/{news_analysis,issue_docent}.py와 일치.
 
 Revision ID: a1b2c3d4e5f6
-Revises: 55d278ba5941
+Revises: fa6e579bc7dc
 Create Date: 2026-06-16 00:00:00.000000
 
 """
@@ -19,7 +19,7 @@ from sqlalchemy.dialects import postgresql
 
 # revision identifiers, used by Alembic.
 revision: str = 'a1b2c3d4e5f6'
-down_revision: Union[str, Sequence[str], None] = '55d278ba5941'
+down_revision: Union[str, Sequence[str], None] = 'fa6e579bc7dc'
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 

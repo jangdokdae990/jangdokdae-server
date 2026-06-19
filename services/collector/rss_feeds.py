@@ -1,14 +1,7 @@
 """RSS 피드 목록 — 수집 대상 피드의 식별자·URL·언론사 상수 정의.
 
-역할:
-    rss_collector가 폴링할 16개 피드를 FeedSource 데이터클래스로 선언한다.
-    국내 증권 전문 RSS 13개(DOMESTIC_SECURITIES_RSS) + investing.com 글로벌 3개
-    (GLOBAL_INVESTING_RSS)를 합쳐 ALL_FEEDS로 노출한다.
-
-운영:
-    피드 추가·제거는 이 파일의 리스트만 수정하면 되고 수집기 코드 변경이 불필요하다
-    (설계 02 §5.2). rss_source는 피드 식별자, publisher는 <source> 부재 시
-    news_source 폴백값으로만 쓰인다.
+국내 증권 RSS 13개(DOMESTIC_SECURITIES_RSS) + investing.com 3개(GLOBAL_INVESTING_RSS)를
+합쳐 ALL_FEEDS로 노출한다. 피드 추가·제거는 이 파일의 리스트만 수정하면 된다.
 """
 
 from dataclasses import dataclass
@@ -19,10 +12,12 @@ class FeedSource:
     """수집 대상 RSS 피드 1개의 메타데이터."""
 
     url: str          # 실제 요청 보낼 RSS 주소
-    rss_source: str   # 어느 피드인지 가리키는 식별자: "hankyung_finance" ...
-    # 이 피드의 기본 언론사명. 기사에 <source>가 없을 때 news_source 폴백값으로만 쓰임
-    # (결과물에 항상 들어가는 값이 아니라 "예비 출처"). 예: "한국경제"
+    rss_source: str   # 피드 식별자. 예: "hankyung_finance"
+    # 기사에 <source>가 없을 때 news_source 폴백으로 쓰는 언론사명. 예: "한국경제"
     publisher: str
+    # 오프셋 없는 발행시각을 해석할 기준 타임존. 국내 피드는 KST(기본), investing은 UTC.
+    # 예: einfomax는 "2026-06-17 10:40:00"처럼 오프셋 없이 KST를 주므로 UTC로 보면 9h 밀린다.
+    tz: str = "Asia/Seoul"
 
 
 DOMESTIC_SECURITIES_RSS: list[FeedSource] = [
@@ -54,9 +49,16 @@ DOMESTIC_SECURITIES_RSS: list[FeedSource] = [
 ]
 
 GLOBAL_INVESTING_RSS: list[FeedSource] = [
-    FeedSource("https://kr.investing.com/rss/news_1.rss", "investing_fx", "investing.com"),
-    FeedSource("https://kr.investing.com/rss/news_25.rss", "investing_stock", "investing.com"),
-    FeedSource("https://kr.investing.com/rss/news_95.rss", "investing_economy", "investing.com"),
+    # investing은 오프셋 없는 발행시각을 UTC로 준다(국내 피드와 달리 tz=UTC).
+    FeedSource(
+        "https://kr.investing.com/rss/news_1.rss", "investing_fx", "investing.com", tz="UTC"
+    ),
+    FeedSource(
+        "https://kr.investing.com/rss/news_25.rss", "investing_stock", "investing.com", tz="UTC"
+    ),
+    FeedSource(
+        "https://kr.investing.com/rss/news_95.rss", "investing_economy", "investing.com", tz="UTC"
+    ),
 ]
 
 ALL_FEEDS: list[FeedSource] = DOMESTIC_SECURITIES_RSS + GLOBAL_INVESTING_RSS

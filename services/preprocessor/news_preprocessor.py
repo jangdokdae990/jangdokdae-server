@@ -1,15 +1,10 @@
 """뉴스 전처리 — 수집 결과를 인메모리로 정제해 저장 직전 단계로 넘긴다.
 
-파이프라인: 수집(rss_collector) → 전처리(이 모듈) → 1회 저장(save_tool.upsert_news).
-DB 핸드오프(preprocessed_at IS NULL 조회 → UPDATE) 없이, 수집 리스트를 받아
-[HTML 정제 → URL 정규화 → 날짜 필터 → 제목 중복 제거]를 순수 인메모리로 적용한다.
-분석에서 제외할 레코드(24h 초과·제목 중복)는 삭제하지 않고 is_filtered=True로 표시해
-반환하며, 저장은 upsert_news가 url ON CONFLICT DO NOTHING으로 멱등 처리한다.
+수집 리스트를 받아 [HTML 정제 → URL 정규화 → 날짜 필터 → 제목 중복 제거]를 인메모리로 적용한다.
+분석에서 제외할 레코드(24h 초과·제목 중복)는 삭제하지 않고 is_filtered=True로 표시해 반환한다.
 
-타임존 정규화는 수집 단계(rss_collector)에서 KST naive로 끝나므로 여기서 다루지 않는다.
-본문·snippet은 저장하지 않으므로 HTML 정제는 title에만 적용한다.
-
-함수 구성: [정규화] → [날짜 필터] → [제목 중복 제거] → [파이프라인 조립(run_preprocessing)].
+타임존 정규화는 수집 단계에서 끝나므로 여기서 다루지 않는다. 본문·snippet은 저장하지 않으므로
+HTML 정제는 title에만 적용한다.
 """
 
 import html
@@ -26,7 +21,7 @@ logger = logging.getLogger(__name__)
 DEFAULT_THRESHOLD_HOURS = 24       # 날짜 필터: 수집 시점 기준 허용 시간
 DEFAULT_DUP_THRESHOLD = 0.8        # 제목 중복: bigram Jaccard 임계
 
-# 제거 대상 트래킹 파라미터 (설계 04 §3 URL 정규화)
+# 제거 대상 트래킹 파라미터
 TRACKING_PARAMS = frozenset({
     "utm_source", "utm_medium", "utm_campaign", "utm_content", "utm_term",
     "fbclid", "gclid", "ref", "source",
@@ -47,10 +42,7 @@ def clean_title(title: str) -> str:
 
 
 def remove_tracking_params(url: str) -> str:
-    """URL에서 트래킹 파라미터를 제거한다. 쿼리 순서는 보존한다.
-
-    파싱 실패 시 원본 URL을 그대로 반환한다(설계 04 §6 — 계속 진행).
-    """
+    """URL에서 트래킹 파라미터를 제거한다. 쿼리 순서는 보존, 파싱 실패 시 원본 URL을 반환한다."""
     if not url:
         return ""
     try:

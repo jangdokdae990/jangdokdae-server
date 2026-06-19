@@ -1,13 +1,11 @@
 """CompanyCollector — 기업 데이터 수집 단계 진입점 (Airflow Task, 정적 분기).
 
-schedule 값에 따라 수집 대상을 분기한다(설계 03 §7.4):
-    - "morning"/"afternoon": 당일·전일 공시 메타데이터 → disclosures
+schedule 값에 따라 수집 대상을 분기한다:
+    - 장 운영 시간대(premarket/morning/afternoon/afterhours): 당일·전일 공시 → disclosures
     - "macro":               이번 달 거시지표(금리·CPI·M2) → market_indicators
     - "quarterly":           전년도 재무제표 + 사업보고서 청크 → financial_statements·report_chunks
 
-수집기 호출은 입출력이 고정이고 분기가 정적이라 LangGraph가 아니라 Airflow Task로 둔다
-(설계 00 §5.1). 단계끼리 직접 호출하지 않고 공유 DB로만 핸드오프하므로, 각 수집기
-산출물을 save_tool로 즉시 멱등 저장한다. 주가·환율은 적재하지 않는다(분석 시점 on-demand).
+각 수집기 산출물을 save_tool로 즉시 멱등 저장한다. 주가·환율은 적재하지 않는다(분석 시점 on-demand).
 """
 
 import asyncio
@@ -33,7 +31,22 @@ from utils.dates import now_kst
 
 logger = logging.getLogger(__name__)
 
-DAILY_SCHEDULES = frozenset({"morning", "afternoon"})
+# 일일 공시 수집 트리거 — 장 운영 시간대 라벨(보고·로그용, 수집 동작은 동일)
+DAILY_SCHEDULES = frozenset({"premarket", "morning", "afternoon", "afterhours"})
+# ECOS 월지표는 1~2개월 지연 발표 → 당월만 요청하면 거의 빈 응답이라 새 달을 못 채운다.
+# 최근 N개월을 요청하고 멱등 UPSERT(값 갱신)로 신규 발표·과거 개정을 함께 반영한다.
+MACRO_WINDOW_MONTHS = 3
+
+
+def _recent_ym_window(year: int, month: int, months_back: int) -> tuple[str, str]:
+    """(year, month)에서 months_back개월 전까지의 (bgn_ym, end_ym) YYYYMM 쌍을 반환."""
+    end_ym = f"{year}{month:02d}"
+    m = month - months_back
+    y = year
+    while m <= 0:
+        m += 12
+        y -= 1
+    return f"{y}{m:02d}", end_ym
 
 
 class CompanyCollector:
@@ -79,8 +92,10 @@ class CompanyCollector:
         return {"disclosures": n}
 
     async def _collect_macro(self, db: AsyncSession) -> dict[str, int]:
-        ym = now_kst().strftime("%Y%m")  # 이번 달 1건 (월별 incremental)
-        collected = await MacroCollector().collect_ecos(ym, ym)
+        # 당월만 요청하면 ECOS 발표 지연으로 새 달을 못 채우므로 최근 N개월 윈도우를 조회한다.
+        now = now_kst()
+        bgn_ym, end_ym = _recent_ym_window(now.year, now.month, MACRO_WINDOW_MONTHS)
+        collected = await MacroCollector().collect_ecos(bgn_ym, end_ym)
         n = await upsert_market_indicators(db, [c.to_record() for c in collected])
         return {"market_indicators": n}
 
