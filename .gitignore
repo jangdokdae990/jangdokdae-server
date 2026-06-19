@@ -40,6 +40,7 @@ htmlcov/
 # 로그
 *.log
 logs/
+dev-logs/
 
 # 기타
 tmp/
