@@ -1,7 +1,8 @@
+# 단독 실행: uv run pytest tests/test_rss_feeds.py -s
 """RSS 피드 레지스트리 로더 테스트 (설계 02 §4).
 
 피드 정본을 코드 상수에서 YAML로 이관함 — 로더가 YAML을 FeedSource로 정확히 파싱하고
-active=false를 제외하며, 필수 키 누락 시 즉시 실패하는지 검증한다. 정본 config/feeds.yaml도
+active=false를 제외하며, 필수 키 누락 시 즉시 실패하는지 검증한다. 정본 config/news_feeds.yaml도
 로드 가능한지 함께 본다(잘못된 레지스트리가 조용히 빈 목록이 되면 수집량 급감을 놓친다).
 """
 
@@ -61,6 +62,6 @@ feeds:
 
 
 def test_production_registry_loads_nonempty():
-    # 정본 config/feeds.yaml이 실제로 로드되고 비어 있지 않은지(설정 회귀 가드)
+    # 정본 config/news_feeds.yaml이 실제로 로드되고 비어 있지 않은지(설정 회귀 가드)
     assert len(ALL_FEEDS) > 0
     assert all(f.url and f.rss_source and f.publisher for f in ALL_FEEDS)
