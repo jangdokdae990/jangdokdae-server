@@ -1,6 +1,6 @@
 # 뉴스 데이터 수집 기획서
 
-> **작성자** Kim minkyoung · **작성일** 2026-05-28 (2026-06-12 핵심 압축 개정, 2026-06-18 재설계 개정)
+> **작성자** Kim minkyoung · **작성일** 2026-05-28 (2026-06-12 핵심 압축 개정, 2026-06-18 재설계 개정, 2026-06-19 설계 리뷰 보강)
 >
 > **범위** 뉴스 수집 → 저장 (전처리는 [04](./04-preprocessing-design.md), 임베딩은 [05](./05-embedding-clustering-design.md))
 >
@@ -112,11 +112,12 @@
 ```mermaid
 flowchart TD
     A["collect<br/>(YAML 레지스트리 활성 피드 폴링 · KST 정규화 · GUID 추출 · 실패 피드 식별)"]
-    B["run_preprocessing<br/>(HTML · URL · 24h · 제목중복 · GUID 중복 — 인메모리, →04)"]
-    C["fetch_bodies<br/>(전체 기사 trafilatura fetch — 처리용, 폐기, §8.4)"]
-    D["upsert_news<br/>(정제본 1회 저장, ON CONFLICT(guid) — reprint_count 집계)"]
-    A --> B --> C --> D
+    B["run_preprocessing<br/>(HTML · URL · 24h · 제목중복 — 인메모리, →04)"]
+    D["upsert_news<br/>(정제본 1회 저장, ON CONFLICT(guid))"]
+    A --> B --> D
 ```
+
+**본문 fetch는 수집 단계가 아니다.** 본문은 DB에 저장하지 않고(저작권 §8.4), 임베딩은 별도 staged 단계(EmbeddingClusterer가 공유 DB에서 미임베딩분을 읽음)라, 전체 기사 본문은 **임베딩 직전(§5)에 `trafilatura`로 fetch 후 폐기**한다. `reprint_count` 집계도 중복 병합이 일어나는 §5 dedup 단계에 속한다. 따라서 `NewsCollector`는 `collect → preprocess → upsert`만 수행한다.
 
 > **State는 데이터가 아니라 보고다.** 반환값(XCom)엔 카운트와 실패 신호(`collected`/`kept`/`saved`/`failed_feeds`)만 담는다 — 실제 데이터 핸드오프는 공유 DB 상태 컬럼으로(→ [01 §2](./01-pipeline-orchestration-design.md#2-전체-구조--데이터-핸드오프)). `failed_feeds`는 일부 피드의 조용한 실패를 구조적 신호로 끌어올려 수집량 급감을 인지하게 한다.
 
@@ -175,6 +176,19 @@ flowchart TD
 
 > 과거 설계는 분석 시점에 **대표 1건만** fetch했다(실측 성공률 92%, → [이전 접근 · 검증 이력](#이전-접근--검증-이력)). 전체 fetch로 바뀌며 요청량·페이월 부담이 늘었고 이를 감수한다.
 
+#### 8.4.1 요청 폭주·차단 방어 (전체 fetch 전환의 운영 가드)
+
+전체 기사 fetch는 피드가 늘수록 **특정 매체 IP 차단(429/403)·페이월·요청 폭주**에 노출된다. 우회(프록시 로테이션)는 약관·robots 위반 소지가 있어 **지양**하고, **절제·격리·fallback**으로 막는다.
+
+| 가드 | 정책 |
+|------|------|
+| **도메인별 rate limit** | 호스트(도메인)별 동시성·초당 요청 상한을 두어 한 매체에 폭주하지 않게 한다(피드 단위 `Semaphore`만으로는 같은 매체 다피드 폭주를 못 막음). |
+| **429/403 백오프** | `Retry-After` 존중 + 지수 백오프, 한도 초과 시 해당 도메인 **이번 run 스킵**(title-only fallback). 4xx·5xx는 재시도하지 않고 격리. |
+| **fetch 전체 예산 타임아웃** | 임베딩 단계 fetch에 총 시간 예산을 두고 초과분은 **title-only로 강제 전환** — 세션 배치 SLA가 fetch latency에 끌려가지 않게 한다. |
+| **robots/약관** | 공개 RSS가 가리키는 본문 페이지만 fetch, `User-Agent` 명시, robots 차단 경로는 제외. |
+
+> 우회가 아니라 **차단당하면 우아하게 포기(title-only)** 가 원칙 — 본문은 어디까지나 임베딩 신호 보강용이고, 없으면 제목 중심으로 진행하도록 이미 설계돼 있다(§8.4 표·[04 §6](./04-preprocessing-design.md#6-에러-처리)).
+
 ### 8.5 중복 제거 · 전재 카운트
 
 다층 중복 제거를 **모두 유지**하되, 수집-시점 정확 중복 제거와 화제성 신호를 추가했다(병합 설계).
@@ -226,11 +240,12 @@ flowchart LR
 | 3 | 전처리 모듈 (인메모리, →04) | 완료 (구 설계) |
 | 4 | 러너 완료 + Airflow DAG (시장 세션 4분할) | 진행 중 |
 | 5 | 본문 fetch 품질 검증 | 1차 실측 완료 (대표 1건 92%, 구 설계) — 전체 fetch 재검증 필요 |
-| R1 | **YAML 피드 레지스트리** (소스 정본 코드→YAML 이관) | 완료 (2026-06-19, `config/feeds.yaml`) |
+| R1 | **YAML 피드 레지스트리** (소스 정본 코드→YAML 이관) | 완료 (2026-06-19, `config/news_feeds.yaml`) |
 | R2 | **본문 전체 fetch**(수집·임베딩 시점, 처리 후 폐기) + 임베딩 입력 연동(05) | 재구현 필요 |
 | R3 | **GUID 중복키** + `guid` unique 인덱스 (스키마 변경·마이그레이션) | 완료 (2026-06-19, url unique→일반 인덱스 강등) |
 | R4 | **reprint_count** 전재 카운트 집계·보존 | 재구현 필요 |
 | R5 | 수집·임베딩 시장 세션 주기 + 클러스터링 이벤트 기반 배치(임베딩 완료 트리거) 분리 (00·05) | 재구현 필요 |
+| R6 | **본문 fetch 운영 가드**(도메인별 rate limit + 429/403 백오프 + fetch 전체 예산 타임아웃 → title-only fallback, §8.4.1) | 재구현 필요 |
 
 ---
 

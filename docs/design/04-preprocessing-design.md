@@ -30,13 +30,13 @@
 
 ### 1.2 전처리의 위치 — 수집·전처리·저장을 한 흐름으로
 
-> 재설계: 본문이 파이프라인에 포함되며(수집·임베딩 시점에 trafilatura로 fetch), 전처리에 **본문 정제(보일러플레이트 제거)·임베딩 입력용 청크 준비**가 추가됐다. 본문 텍스트는 이미 fetch된 상태에서 정제하므로 전처리의 "외부 호출 없는 순수 CPU" 전제는 그대로 유효하다.
+> 재설계: 본문이 파이프라인에 포함되나 **본문 fetch·정제·청크는 임베딩 단계(05) 소속**이다 — 본문은 DB에 저장하지 않고 임베딩 직전에 trafilatura로 fetch하므로(→ [02 §7](./02-news-collection-design.md#7-뉴스-수집-단계)), 수집 시점 전처리(`run_preprocessing`)는 제목·URL·날짜·제목중복만 다룬다. 본문 정제·청크는 별도 순수 함수 `body_processor`가 임베딩 단계에서 호출한다(외부 호출 없는 순수 CPU 연산).
 
 ```mermaid
 flowchart LR
-    A[수집<br/>본문 fetch 포함] --> B[인메모리 정제<br/>HTML → 본문 정제 → URL → 날짜 → 무관 필터 → 중복 제거]
+    A[수집<br/>제목·메타만] --> B[인메모리 정제 run_preprocessing<br/>HTML → URL → 날짜 → 제목중복]
     B --> C[(DB 저장 1회)]
-    C -->|is_filtered=FALSE<br/>AND embedding IS NULL| D[임베딩·클러스터링]
+    C -->|is_filtered=FALSE<br/>AND embedding IS NULL| D[임베딩·클러스터링<br/>본문 fetch·정제·청크 = body_processor]
 ```
 
 **왜 인메모리인가.** 타임존·URL 정규화를 수집/저장 직전에 끝내면 전처리에 남는 일은 **외부 호출 없는 순수 CPU 연산**이다(본문도 fetch 완료 후 텍스트 정제만). 재시도할 외부 의존성이 없으므로 원시 저장 후 UPDATE(더블 라이트 + 상태 컬럼)는 이득 없이 복잡도만 늘린다 → 수집→전처리→저장을 **한 Airflow Task**로 묶고, DB 핸드오프는 외부 API 의존 단계(임베딩 이후)에만 남긴다.
@@ -53,7 +53,7 @@ flowchart LR
 
 ## 2. 전처리 파이프라인
 
-**정규화 → 필터 → 중복 제거 순서**가 중요하다. 본문 정제·무관 필터가 더해져 단계가 늘었다.
+**정규화 → 필터 → 중복 제거 순서**가 중요하다. 단, 단계는 **두 실행 시점**에 나뉜다 — Step 1·3·4·6-A는 수집 시점 `run_preprocessing`(제목·메타), **Step 2(본문 정제·청크)는 임베딩 단계 `body_processor`**, Step 6-C(cosine)는 임베딩 단계 dedup. 아래 다이어그램은 논리 순서이며 한 함수가 전부 실행한다는 뜻이 아니다.
 
 ```mermaid
 flowchart TB
@@ -81,9 +81,9 @@ flowchart TB
 
 `html.unescape` + 태그 제거 정규식, stdlib만 사용. 제목 정제 대상은 `title`. 예: `"<b>삼성전자</b> &amp;..."` → `"삼성전자 &..."`.
 
-### Step 2. 본문 정제 (보일러플레이트 제거 + 청크 준비)
+### Step 2. 본문 정제 (보일러플레이트 제거 + 청크 준비) — 임베딩 단계
 
-수집/임베딩 시점에 trafilatura로 fetch된 본문 텍스트를 **가벼운 규칙 기반**으로 정제한다(외부 호출 없음, 텍스트는 이미 fetch 완료).
+임베딩 직전에 trafilatura로 fetch된 본문 텍스트를 **가벼운 규칙 기반**으로 정제한다(외부 호출 없음, 텍스트는 이미 fetch 완료). 수집 시점 `run_preprocessing`이 아니라 **임베딩 단계가 호출하는 순수 함수**다. 구현: [`services/preprocessor/body_processor.py`](../../services/preprocessor/body_processor.py)(`clean_body`·`chunk_with_overlap`) — 패턴은 [`config/news_body.yaml`](../../config/news_body.yaml), 청크 크기·overlap은 `app/config.py`(`chunk_size`/`chunk_overlap`, bake-off 스윕 대상).
 
 - **공백·줄바꿈 정규화**: 연속 공백·빈 줄 축약.
 - **한국 뉴스 보일러플레이트 제거**: 기자 서명, 저작권 푸터(예: "무단전재·재배포 금지"), "관련기사", 이미지 캡션 패턴 제거. **패턴은 설정 파일로 관리**(코드 하드코딩 금지)해 매체 추가 시 코드 변경 없이 확장.
@@ -121,7 +121,7 @@ flowchart TB
 
 `run_preprocessing(records, *, now, threshold_hours=24, dup_threshold=0.8)` — DB 접근 없는 **순수 함수**라 단위 테스트가 쉽다. 수집 노드가 `collect → run_preprocessing → upsert_news`로 조립(→ [02 §7](./02-news-collection-design.md#7-뉴스-수집-단계)).
 
-> 재설계로 본문 처리(보일러플레이트 제거·청크 준비)·무관 필터·전재 카운트·보일러플레이트 패턴 설정이 더해져 **시그니처가 바뀔 수 있다**(예: 정제 본문/청크 산출물 반환, 보일러플레이트 규칙·블록리스트 주입, `min_body_len` 등). 본문 정제는 텍스트 입력만 받는 순수 함수 성격을 유지한다. 구현·시그니처 정본: [`news_preprocessor.py`](../../services/preprocessor/news_preprocessor.py).
+> **본문 처리는 `run_preprocessing`이 아니다.** 본문은 임베딩 단계에서만 존재하므로 본문 정제·청크는 별도 순수 함수 [`body_processor.py`](../../services/preprocessor/body_processor.py)(`clean_body`·`chunk_with_overlap`)가 맡는다 — `run_preprocessing`은 수집 시점의 제목·URL·날짜·제목중복 전용으로 유지한다. 무관/노이즈 필터·전재 카운트가 더해지면 `run_preprocessing` 시그니처가 바뀔 수 있다. 구현·시그니처 정본: [`news_preprocessor.py`](../../services/preprocessor/news_preprocessor.py).
 
 ---
 
@@ -164,8 +164,8 @@ flowchart TB
 | 2 | 단위 테스트 (`tests/test_news_preprocessor.py`) | 완료 (구 설계, 본문·신규 단계분 보강 필요) |
 | 3 | 수집 노드 조립 (`news_collector.py`) | 완료 (구 설계) |
 | 4 | `preprocessed_at` 제거 마이그레이션 | 완료 (2026-06-11) |
-| 5 | 본문 정제(보일러플레이트 제거) + 패턴 설정 파일 | 재구현 필요 |
-| 6 | 임베딩 입력용 본문 청크 준비(인접 overlap) | 재구현 필요 |
+| 5 | 본문 정제(보일러플레이트 제거) + 패턴 설정 파일 | 완료 (2026-06-19, `body_processor.clean_body` + `config/news_body.yaml`) |
+| 6 | 임베딩 입력용 본문 청크 준비(인접 overlap) | 완료 (2026-06-19, `body_processor.chunk_with_overlap`, 문자 기반 baseline) |
 | 7 | 무관/노이즈 필터(본문 길이 하한·카테고리 블록리스트) | 재구현 필요 |
 | 8 | GUID 키 강화 + 전재(reprint) 수 보존 | 재구현 필요 |
 | 9 | `run_preprocessing` 시그니처 갱신 + 단위 테스트 보강 | 재구현 필요 |
