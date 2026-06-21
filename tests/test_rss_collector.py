@@ -1,3 +1,4 @@
+# 단독 실행: uv run pytest tests/test_rss_collector.py -s
 """RSSCollector 회귀 테스트 — 일시 오류 재시도 · 조용한 실패(0건) 경보 · 피드 단위 격리.
 
 배경(노션 todo 02):
@@ -110,6 +111,28 @@ async def test_persistent_error_isolated_to_failed_feeds(install_transport):
 
     assert collected == []
     assert failed == ["example_feed"]
+
+
+async def test_excluded_news_filtered_from_collection(install_transport, caplog):
+    """수집 단계에서 비기사성 뉴스(AI 카드뉴스·부고·괄호 변형)는 거르고 기사만 남긴다.
+
+    판정 로직 자체는 tests/test_news_filter.py가 검증 — 여기서는 collect()가 필터를
+    실제로 적용하고 제외 로그를 남기는지(배선)만 확인한다.
+    """
+    rss = """<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0"><channel><title>예시</title>
+<item><title>[AI 카드뉴스] 한눈에 보는 증시</title><link>https://news.example.com/ai</link></item>
+<item><title>&lt;부고&gt; 최종원씨 부친상</title><link>https://news.example.com/obit</link></item>
+<item><title>코스피 상승 마감</title><link>https://news.example.com/real</link></item>
+</channel></rss>"""
+    install_transport(lambda request: httpx.Response(200, text=rss))
+
+    with caplog.at_level(logging.INFO):
+        collected, failed = await RSSCollector(feeds=[FEED]).collect()
+
+    assert failed == []
+    assert [c.title for c in collected] == ["코스피 상승 마감"]
+    assert any("비기사성 뉴스 제외" in record.message for record in caplog.records)
 
 
 def test_extract_guid_returns_feed_guid():

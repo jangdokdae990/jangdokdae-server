@@ -1,6 +1,7 @@
-"""RSS 피드 뉴스 수집기 — 국내 증권 섹션 피드 13개를 병렬 폴링.
+"""RSS 피드 뉴스 수집기 — 국내 증권 섹션 피드(config/news_feeds.yaml)를 병렬 폴링.
 
 기사 제목·URL·출처·발행일만 수집한다(본문·snippet은 저작권 문제로 저장하지 않음).
+비기사성 뉴스(AI 요약 카드뉴스·부고 등)는 기자 기사가 아니므로 수집 단계에서 제외한다.
 Semaphore로 동시성을 제한하고 피드 단위로 에러를 격리한다. 발행일은 KST naive
 datetime으로 정규화한다(원본 문자열 파싱 우선, 오프셋 없으면 feed.tz로 해석 → struct_time 폴백).
 """
@@ -15,6 +16,7 @@ import feedparser
 import httpx
 from dateutil import parser as date_parser
 
+from services.collector.news_filter import is_excluded
 from services.collector.rss_feeds import ALL_FEEDS, FeedSource
 from services.collector.tools.with_retry import with_retry
 from utils.dates import to_naive_kst
@@ -113,6 +115,12 @@ class RSSCollector:
             title = entry.get("title", "").strip()
             url = entry.get("link", "").strip()
             if not title or not url:
+                continue
+            summary = entry.get("summary", "") or entry.get("description", "")
+            if is_excluded(title, summary):
+                logger.info(
+                    "비기사성 뉴스 제외 rss_source=%s title=%s", feed.rss_source, title
+                )
                 continue
             collected.append(
                 CollectedNews(
