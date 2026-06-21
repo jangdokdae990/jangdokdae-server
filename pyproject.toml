@@ -77,5 +77,5 @@ namespace_packages = true
 explicit_package_bases = true
 
 [[tool.mypy.overrides]]
-module = ["feedparser", "pgvector.*", "dateutil.*", "FinanceDataReader", "pykrx.*", "hdbscan", "sklearn.*", "yaml", "lxml.*"]
+module = ["feedparser", "pgvector.*", "dateutil.*", "FinanceDataReader", "pykrx.*", "hdbscan", "sklearn.*", "yaml", "lxml.*", "jose.*"]
 ignore_missing_imports = true

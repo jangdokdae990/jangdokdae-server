@@ -32,6 +32,39 @@ class Settings(BaseSettings):
     google_cloud_location: str = "asia-northeast3"
     vertex_model: str = "gemini-3.5-flash"
 
+    # --- 인증/세션 (httpOnly 쿠키 + stateless JWT) ---
+    secret_key: str  # JWT 서명 키 — .env 필수, 코드 기본값 금지(시크릿)
+    algorithm: str = "HS256"
+    access_token_expire_minutes: int = 30
+    refresh_token_expire_days: int = 14
+    access_cookie_name: str = "access_token"
+    refresh_cookie_name: str = "refresh_token"
+    cookie_secure: bool = False  # 운영(HTTPS)에서 True — 평문 전송 차단
+    cookie_samesite: str = "lax"  # OAuth 리다이렉트 쿠키 전달 위해 strict 대신 lax
+    cookie_domain: str | None = None
+
+    # --- CORS / 프론트엔드 ---
+    cors_origins: str = "http://localhost:3000"
+    frontend_base_url: str = "http://localhost:3000"  # 로그인 완료·온보딩 redirect 대상
+
+    # --- OAuth (client secret은 BE에만 보관, FE 번들 유입 금지) ---
+    # redirect_uri는 provider 콘솔 등록값과 정확히 일치해야 함
+    # (= {backend}/api/v1/auth/{provider}/callback)
+    oauth_kakao_client_id: str = ""
+    oauth_kakao_client_secret: str = ""
+    oauth_kakao_redirect_uri: str = ""
+    oauth_google_client_id: str = ""
+    oauth_google_client_secret: str = ""
+    oauth_google_redirect_uri: str = ""
+    oauth_naver_client_id: str = ""
+    oauth_naver_client_secret: str = ""
+    oauth_naver_redirect_uri: str = ""
+
+    @property
+    def cors_origin_list(self) -> list[str]:
+        # CORSMiddleware는 origin 리스트를 받음 — 콤마 구분 env를 분리
+        return [origin.strip() for origin in self.cors_origins.split(",") if origin.strip()]
+
     @property
     def async_url(self) -> str:
         # asyncpg는 sslmode 등 쿼리 파라미터를 모름 → 제거하고 SSL은 connect_args로 전달
