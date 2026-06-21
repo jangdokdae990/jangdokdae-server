@@ -87,7 +87,8 @@ auth/google_oauth.py             # GoogleOAuthHandler
 FastAPI 관행에 따라 역할 중심 이름을 사용한다.
 
 ```
-app/api/models.py        # Pydantic 스키마 모음 (단수 아닌 모음이므로 복수 아님)
+app/api/schemas/auth.py  # 도메인별 Pydantic 요청/응답 스키마 (auth, onboarding, user …)
+app/api/schemas/common.py # 스키마 공통 베이스(ORMSchema)·에러 응답 봉투
 app/api/routers/news.py  # 도메인별 라우터 — 도메인명 단수
 app/db/orm_models/       # ORM 모델 (모델별 파일 분리: news.py, stock_price.py, common.py)
 app/db/queries.py        # 쿼리 함수 모음

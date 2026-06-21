@@ -52,7 +52,7 @@ app/
 ├── main.py             # FastAPI 앱 생성, 미들웨어, 라우터 등록
 ├── config.py           # 환경 변수 로딩 (pydantic-settings)
 ├── api/
-│   ├── models.py       # Pydantic 요청/응답 스키마
+│   ├── schemas/        # Pydantic 요청/응답 스키마 (도메인별 파일 + common.py)
 │   └── routers/
 │       ├── auth.py     # POST /auth/login, /logout, /refresh
 │       ├── users.py    # GET/PUT /users/me
@@ -72,7 +72,7 @@ app/
     └── graph.py         # LangGraph 워크플로우 (노드 연결)
 ```
 
-**`app/api/models.py`** — Pydantic 스키마만 담습니다. ORM 모델(`app/db/models.py`)과 분리되어 있습니다.
+**`app/api/schemas/`** — Pydantic 스키마만 담습니다(도메인별 파일 분리). ORM 모델(`app/db/orm_models/`)과 분리되어 있습니다.
 
 **`app/db/queries.py`** — 쿼리 로직을 라우터에서 분리합니다. 라우터는 쿼리 함수를 호출만 합니다.
 
