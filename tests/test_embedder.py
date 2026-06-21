@@ -1,3 +1,4 @@
+# 단독 실행: uv run pytest tests/test_embedder.py -s
 """embedder 순수 함수 단위 테스트 — 싱글톤 보존·중심 정렬·복합 중요도 스코어(설계 05 §5·§6).
 
 DB·외부 API 없이 검증 가능한 순수 로직만 다룬다. 임베딩 호출·DB 적재는 통합 단계에서 검증한다.

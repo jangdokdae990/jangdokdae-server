@@ -1,3 +1,4 @@
+# 단독 실행: uv run pytest tests/test_financial_collector.py -s
 """FinancialCollector 회귀 테스트 — fs_div(CFS/OFS) 출처 보존 · 일시 오류 재시도.
 
 배경(노션 todo 03):

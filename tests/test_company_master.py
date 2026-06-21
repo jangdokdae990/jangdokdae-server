@@ -1,3 +1,4 @@
+# 단독 실행: uv run pytest tests/test_company_master.py -s
 """company_master_collector 섹터 매핑 회귀 테스트.
 
 KRX 업종명 → GICS 섹터 코드 매핑이 (1) 유효한 GICS 섹터 코드만 가리키고,

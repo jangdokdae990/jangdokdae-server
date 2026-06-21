@@ -1,3 +1,4 @@
+# 단독 실행: uv run pytest tests/test_news_preprocessor.py -s
 """news_preprocessor 단위 테스트 — 순수 함수 + 파이프라인 조립 (설계 04 §3·§4).
 
 DB 접근 없는 순수 인메모리 모듈이므로 외부 의존성 없이 검증한다.
