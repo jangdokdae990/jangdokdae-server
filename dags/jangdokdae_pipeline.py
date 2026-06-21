@@ -1,4 +1,4 @@
-"""메인 파이프라인 DAG — 평일 00:00·09:00·12:00·15:30 KST, 1 run = 전체 완주.
+"""메인 파이프라인 DAG — 매일(주말 포함) 00:00·09:00·12:00·15:30 KST, 1 run = 전체 완주.
 
 흐름: [collect_news, collect_company] >> embed_cluster (분석은 미구현 TODO).
 각 Task가 단계를 직접 호출하고, 단계 간 데이터는 공유 DB(Neon) 상태로만 핸드오프한다.
@@ -18,13 +18,14 @@ from airflow.providers.standard.operators.python import ExternalPythonOperator
 from airflow.sdk import DAG
 from airflow.timetables.trigger import MultipleCronTriggerTimetable
 
-# 평일 장 운영 시간대 4구간 경계에 트리거 — 각 run의 트리거 시각이 해당 구간에 들어가
-# market_session 라벨(premarket/morning/afternoon/afterhours)과 자동 정합한다.
+# 매일(주말 포함) 장 운영 시간대 4구간 경계에 트리거 — 각 run의 트리거 시각이 해당
+# 구간에 들어가 market_session 라벨(premarket/morning/afternoon/afterhours)과 자동 정합한다.
+# 주말엔 장이 닫혀 있지만 야간·해외 뉴스와 공시가 이어지므로 동일 빈도로 수집한다.
 MARKET_SCHEDULE = MultipleCronTriggerTimetable(
-    "0 0 * * 1-5",    # 00:00 → premarket  (장 시작 전, 야간 공시 흡수)
-    "0 9 * * 1-5",    # 09:00 → morning
-    "0 12 * * 1-5",   # 12:00 → afternoon
-    "30 15 * * 1-5",  # 15:30 → afterhours (정규장 마감 직후)
+    "0 0 * * *",    # 00:00 → premarket  (장 시작 전, 야간 공시 흡수)
+    "0 9 * * *",    # 09:00 → morning
+    "0 12 * * *",   # 12:00 → afternoon
+    "30 15 * * *",  # 15:30 → afterhours (정규장 마감 직후)
     timezone="Asia/Seoul",
 )
 
@@ -80,7 +81,7 @@ def _embed_cluster() -> None:
 
 with DAG(
     dag_id="jangdokdae_pipeline",
-    # 평일 00:00·09:00·12:00·15:30 KST 4구간 경계 트리거 (MARKET_SCHEDULE 주석 참고).
+    # 매일(주말 포함) 00:00·09:00·12:00·15:30 KST 4구간 경계 트리거 (MARKET_SCHEDULE 주석 참고).
     schedule=MARKET_SCHEDULE,
     start_date=pendulum.datetime(2026, 1, 1, tz="Asia/Seoul"),
     catchup=False,  # 뉴스는 24h 창이라 과거 소급이 무의미
