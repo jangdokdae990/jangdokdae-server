@@ -1,3 +1,4 @@
+# 단독 실행: uv run pytest tests/test_article_fetcher.py -s
 """article_fetcher 회귀 테스트 — 본문 fetch가 http→https 301을 따라가는지 검증 (설계 02 §8.4).
 
 배경: 국내 다수 매체가 http→https 301을 반환한다. 추적하지 않으면 fetch가 빈 리다이렉트
@@ -15,6 +16,7 @@ import httpx
 import pytest
 
 from services.analyzer import article_fetcher
+from services.analyzer.article_fetcher import _extract_body
 
 REDIRECT_URL = "http://news.example.com/article"  # 매체가 https로 301 보내는 원본 URL
 FINAL_URL = "https://news.example.com/article"
@@ -89,3 +91,74 @@ async def test_fetch_first_available_falls_back_past_paywall(patched_fetch):
     )
 
     assert body == EXTRACTED_BODY
+
+
+# favor_precision은 단조 반복 텍스트를 저품질로 버리므로, 실제 기사처럼 문단을 변주한다.
+_REAL_PARAS = "".join(
+    f"<p>실제 기자가 작성한 기사 본문 {i}번째 문단으로, 사건의 경위와 배경을 구체적으로 전한다.</p>"
+    for i in range(8)
+)
+_AI_PARAS = "".join(
+    f"<p>AI 자동 생성 분석 위젯이 만든 {i}번째 요약 문장으로 본문과 무관한 합성 텍스트다.</p>"
+    for i in range(8)
+)
+
+
+def test_extract_body_prefers_article_body_over_ai_widget():
+    """itemprop=articleBody가 있으면 그 안만 추출 — AI 위젯 등 잡음을 구조적으로 배제한다."""
+    html = (
+        f'<html><body><div class="ai_explain">{_AI_PARAS}</div>'
+        f'<div itemprop="articleBody">{_REAL_PARAS}</div></body></html>'
+    )
+
+    body = _extract_body(html)
+
+    assert body is not None
+    assert "실제 기자가 작성한" in body
+    assert "AI 자동 생성 분석" not in body
+
+
+def test_extract_body_falls_back_without_article_body_container():
+    """itemprop=articleBody가 없으면 전체 HTML에서 추출한다(폴백)."""
+    html = f"<html><body><article>{_REAL_PARAS}</article></body></html>"
+
+    body = _extract_body(html)
+
+    assert body is not None
+    assert "실제 기자가 작성한" in body
+
+
+def test_extract_body_concatenates_multiple_article_body_nodes():
+    """itemprop=articleBody가 여러 개면 모두 이어 붙여 추출한다(본문 분할 기사 보존)."""
+    first = "".join(
+        f"<p>첫째 블록 {i}번째 문단으로, 사건의 경위와 배경을 구체적으로 전한다.</p>"
+        for i in range(4)
+    )
+    second = "".join(
+        f"<p>둘째 블록 {i}번째 문단으로, 향후 전망과 시장 반응을 상세히 설명한다.</p>"
+        for i in range(4)
+    )
+    html = (
+        f'<html><body><div itemprop="articleBody">{first}</div>'
+        f'<p>중간 위젯</p>'
+        f'<div itemprop="articleBody">{second}</div></body></html>'
+    )
+
+    body = _extract_body(html)
+
+    assert body is not None
+    assert "첫째 블록" in body
+    assert "둘째 블록" in body
+
+
+def test_extract_body_falls_back_when_container_extraction_empty():
+    """articleBody 컨테이너가 비어 추출 결과가 없으면 전체 HTML로 폴백한다(기사 누락 방지)."""
+    html = (
+        f'<html><body><div itemprop="articleBody"></div>'
+        f'<article>{_REAL_PARAS}</article></body></html>'
+    )
+
+    body = _extract_body(html)
+
+    assert body is not None
+    assert "실제 기자가 작성한" in body

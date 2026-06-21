@@ -14,18 +14,19 @@ class News(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     title: Mapped[str] = mapped_column(String(500), nullable=False)
-    url: Mapped[str] = mapped_column(String(500), nullable=False, unique=True)
-    rss_source: Mapped[str] = mapped_column(String(100), nullable=False)   # 어느 RSS 피드
-    news_source: Mapped[str] = mapped_column(String(100), nullable=False)  # 본문 출처(언론사)
-    # 종목 뉴스 — NER이 채움
+    # url은 더 이상 단일 멱등키가 아니다 — guid가 수집-시점 정확 중복키(아래)다.
+    # ON CONFLICT은 한 제약만 타겟하므로 url unique를 유지하면 같은 url·다른 guid 전재
+    # 기사에서 IntegrityError가 난다. url은 조회·중복 진단용 일반 인덱스로 강등한다.
+    url: Mapped[str] = mapped_column(String(500), nullable=False)
+    # 수집-시점 정확 중복키 — 피드 제공 GUID, 없으면 정규화 URL(전처리에서 폴백). 멱등 저장 키.
+    guid: Mapped[str] = mapped_column(String(500), nullable=False, unique=True)
+    rss_source: Mapped[str] = mapped_column(String(100), nullable=False)
+    news_source: Mapped[str] = mapped_column(String(100), nullable=False)
     stock_code: Mapped[str | None] = mapped_column(String(20), nullable=True)
-    # 발행 시각(KST, naive). 일부 RSS 기사는 발행일이 없어 nullable.
     published_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=False), nullable=True)
-    # core pg_insert는 Python default 미적용 → server_default로 DB 기본값(KST) 지정
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=False), server_default=KST_NOW, nullable=False
     )
-    # 전처리에서 분석 대상에서 제외됨(24h 초과·제목 중복). True면 임베딩·분석 스킵.
     is_filtered: Mapped[bool] = mapped_column(
         Boolean, server_default=text("false"), default=False, nullable=False
     )
@@ -37,10 +38,18 @@ class News(Base):
     is_analyzed: Mapped[bool] = mapped_column(
         Boolean, server_default=text("false"), default=False, nullable=False
     )
+    # 같은 기사를 전재(재게재)한 매체 수 — 화제성 신호.
+    # 파생 데이터(feature)일 뿐 단계 간 계약(게이트)이 아니다 — 어떤 단계도 읽는 조건으로 쓰지 않고
+    # 중요도 스코어가 참고만 한다. 다층 중복 제거로 묶인 동일 기사군의 매체 수, 미검출 기본값 0.
+    reprint_count: Mapped[int] = mapped_column(
+        Integer, server_default=text("0"), default=0, nullable=False
+    )
     score: Mapped[float | None] = mapped_column(Float, nullable=True)
     embedding: Mapped[list[float] | None] = mapped_column(Vector(768), nullable=True)
 
     __table_args__ = (
+        # url 일반 인덱스 — unique 강등 후에도 조회·중복 진단용으로 유지(멱등키는 guid).
+        Index("ix_news_url", "url"),
         # 종목 뉴스 조회용 부분 인덱스 — stock_code가 있는 행만 인덱싱(NER이 채운 종목 뉴스).
         Index(
             "ix_news_stock_code",

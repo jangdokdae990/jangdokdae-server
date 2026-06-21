@@ -34,7 +34,8 @@ logger = logging.getLogger(__name__)
 # 일일 공시 수집 트리거 — 장 운영 시간대 라벨(보고·로그용, 수집 동작은 동일)
 DAILY_SCHEDULES = frozenset({"premarket", "morning", "afternoon", "afterhours"})
 # ECOS 월지표는 1~2개월 지연 발표 → 당월만 요청하면 거의 빈 응답이라 새 달을 못 채운다.
-# 최근 N개월을 요청하고 멱등 UPSERT(값 갱신)로 신규 발표·과거 개정을 함께 반영한다.
+# 당월부터 N개월 전까지(총 N+1개 월) 윈도우를 요청하고 멱등 UPSERT(값 갱신)로
+# 신규 발표·과거 개정을 함께 반영한다. 과조회분은 멱등이라 무해하다.
 MACRO_WINDOW_MONTHS = 3
 
 

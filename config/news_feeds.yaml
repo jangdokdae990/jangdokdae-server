@@ -1,0 +1,26 @@
+# RSS 피드 레지스트리 (정본) — 수집 대상 피드 목록.
+#
+# 컬럼:
+#   rss_source : 피드 식별자(고유). news.rss_source에 저장. 예: hankyung_finance
+#   publisher  : 언론사 표시명. 기사에 <source>가 없을 때 news_source 폴백
+#   url        : RSS 엔드포인트
+#   region     : 권역(korea/us/global, 선택) — 분류·필터용 메타. 미지정 시 korea
+#   tz         : 오프셋 없는 발행시각 해석 기준 타임존. 국내 섹션 피드는 Asia/Seoul
+#   active     : false면 폴링 제외(비활성화도 코드 변경 없이 이 값만 토글)
+#
+
+feeds:
+  - { rss_source: hankyung_finance,        publisher: 한국경제,     region: korea, url: "https://www.hankyung.com/feed/finance" }
+  - { rss_source: mk_securities,           publisher: 매일경제,     region: korea, url: "https://www.mk.co.kr/rss/50200011/" }
+  - { rss_source: mbn_stock,               publisher: 매일경제TV,   region: korea, url: "https://mbnmoney.mbn.co.kr/rss/news/stock" }
+  - { rss_source: einfomax,                publisher: 연합인포맥스, region: korea, url: "https://news.einfomax.co.kr/rss/S1N2.xml" }
+  - { rss_source: thevaluenews_securities, publisher: 더밸류뉴스,   region: korea, url: "https://www.thevaluenews.co.kr/rss_view.php?code=m6481nr" }
+  - { rss_source: thevaluenews_company,    publisher: 더밸류뉴스,   region: korea, url: "https://www.thevaluenews.co.kr/rss_view.php?code=m65gpg7" }
+  - { rss_source: newswire,                publisher: 뉴스와이어,   region: korea, url: "https://api.newswire.co.kr/rss/industry/203" }
+  - { rss_source: asiae_stock,             publisher: 아시아경제,   region: korea, url: "https://view.asiae.co.kr/rss/stock.htm" }
+  - { rss_source: sedaily_finance,         publisher: 서울경제,     region: korea, url: "https://www.sedaily.com/rss/finance" }
+  - { rss_source: newstomato,              publisher: 뉴스토마토,   region: korea, url: "https://www.newstomato.com/rss/?cate=12" }
+  - { rss_source: fnnews_stock,            publisher: 파이낸셜뉴스, region: korea, url: "https://www.fnnews.com/rss/r20/fn_realnews_stock.xml" }
+  - { rss_source: newspim,                 publisher: 뉴스핌,       region: korea, url: "http://rss.newspim.com/news/category/105" }
+  - { rss_source: yna_market,              publisher: 연합뉴스,     region: korea, url: "https://www.yna.co.kr/rss/market.xml" }
+  - { rss_source: seoulfn,                 publisher: 서울파이낸스, region: korea, url: "https://www.seoulfn.com/rss/S1N2.xml" }
