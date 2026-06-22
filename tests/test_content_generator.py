@@ -59,6 +59,7 @@ def _issue() -> Issue:
 
 def _draft() -> ContentDraft:
     return ContentDraft(
+        title="삼성전자 3분기 실적, 어떻게 읽을까",
         answers=["무슨 일", "예상 대비", "지속성", "앞으로"],
         hook_lines=HookLines(pain="안심해도 될까요", neutral="실적이 발표됐습니다"),
     )
@@ -92,6 +93,8 @@ def test_generate_returns_four_heads_and_hook():
     gen = ContentGenerator(generator=_FakeChain(_draft()))
     result = gen.generate(_issue(), _classification("EARNINGS"))
     assert len(result.heads) == 4
+    # LLM이 생성한 제목이 결과로 전달되는지(원문 기사 제목과 무관).
+    assert result.title == "삼성전자 3분기 실적, 어떻게 읽을까"
     assert result.hook_lines is not None
     assert result.hook_lines.pain == "안심해도 될까요"
     # frame 라벨이 user 프롬프트에 들어갔는지 확인.
@@ -133,6 +136,7 @@ def test_generate_no_enrichment_leaves_block_empty():
 
 def test_term_spans_deduplicated():
     draft = ContentDraft(
+        title="t",
         answers=["a1", "a2", "a3", "a4"],
         hook_lines=HookLines(pain="p", neutral="n"),
         term_spans=[
@@ -168,6 +172,7 @@ def test_opinion_guard_ok_checks_company_in_head1():
 
 def test_generate_with_guard_passes_when_company_present():
     draft = ContentDraft(
+        title="t",
         answers=["삼성전자 목표가 9만원으로 상향", "a2", "a3", "a4"],
         hook_lines=HookLines(pain="p", neutral="n"),
     )
@@ -181,6 +186,7 @@ def test_generate_with_guard_passes_when_company_present():
 def test_generate_with_guard_flags_review_after_retry():
     # 종목명 없는 draft를 계속 반환 → 1회 재생성 후에도 실패 → needs_review True.
     draft = ContentDraft(
+        title="t",
         answers=["AI 부품 시장의 변화", "a2", "a3", "a4"],
         hook_lines=HookLines(pain="p", neutral="n"),
     )

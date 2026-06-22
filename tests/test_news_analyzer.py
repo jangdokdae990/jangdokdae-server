@@ -34,6 +34,7 @@ class _FakeDB:
 
 def _content() -> ContentResult:
     return ContentResult(
+        title="LLM이 생성한 제목",
         heads=[Head(label="l", question="q", answer="a") for _ in range(4)],
         hook_lines=HookLines(pain="p", neutral="n"),
     )
@@ -111,10 +112,18 @@ def patched(monkeypatch):
     async def fake_resolve_sector_ids(db, names):
         return []
 
+    # 종목 거래소→markets.id 해소도 DB 접근이라 가짜로 대체.
+    # 종목 있으면 KOSPI(3), 없고 해외면 GLOBAL(8) 폴백, 국내·종목없음은 빈 값.
+    async def fake_resolve_market_ids(db, company_ids, origin):
+        if company_ids:
+            return [3]
+        return [8] if origin == "해외" else []
+
     monkeypatch.setattr(news_analyzer, "get_unanalyzed_clusters", fake_get_unanalyzed)
     monkeypatch.setattr(news_analyzer, "get_cluster_articles", fake_get_articles)
     monkeypatch.setattr(news_analyzer, "resolve_company_ids", fake_resolve_company_ids)
     monkeypatch.setattr(news_analyzer, "resolve_sector_ids", fake_resolve_sector_ids)
+    monkeypatch.setattr(news_analyzer, "resolve_market_ids", fake_resolve_market_ids)
     monkeypatch.setattr(news_analyzer, "save_news_analysis", fake_save_analysis)
     monkeypatch.setattr(news_analyzer, "save_issue_docent", fake_save_docent)
     monkeypatch.setattr(news_analyzer, "mark_news_analyzed", fake_mark)
@@ -141,6 +150,12 @@ async def test_run_analyzes_and_persists(patched):
     # 태그를 마스터 id로 해소한 백필이 함께 적재되는지(원문 태그와 별도 컬럼).
     assert patched["analysis"][0]["company_ids"] == [99]
     assert patched["analysis"][0]["sector_ids"] == []
+    # issue_docent에도 관심사 매칭 백필(market/sector/company)과 LLM 제목이 적재되는지.
+    docent = patched["docent"][0]
+    assert docent["title"] == "LLM이 생성한 제목"  # 원문 기사 제목이 아닌 LLM 생성 제목
+    assert docent["market_ids"] == [3]  # 종목(삼성전자) 거래소 → KOSPI
+    assert docent["sector_ids"] == []
+    assert docent["company_ids"] == [99]
 
 
 async def test_run_isolates_cluster_failures(patched):

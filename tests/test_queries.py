@@ -17,6 +17,7 @@ from app.db.queries import (
     _escape_like,
     get_or_create_user,
     replace_user_interests,
+    resolve_market_ids,
     update_last_login,
 )
 
@@ -108,3 +109,46 @@ async def test_replace_user_interests_sets_updated_at():
     update_stmts = [str(s) for s in db.statements if str(s).strip().upper().startswith("UPDATE")]
     assert update_stmts
     assert any("updated_at" in s for s in update_stmts)
+
+
+class _RowsDB:
+    """execute 호출마다 미리 준비한 row 목록을 돌려주는 stub — resolve_market_ids 분기 검증용."""
+
+    def __init__(self, *rows_per_call):
+        self._rows_per_call = list(rows_per_call)
+        self.execute_calls = 0
+
+    async def execute(self, _stmt):
+        rows = self._rows_per_call[self.execute_calls] if self.execute_calls < len(
+            self._rows_per_call
+        ) else []
+        self.execute_calls += 1
+        return SimpleNamespace(all=lambda: rows)
+
+
+async def test_resolve_market_ids_from_company_exchange():
+    # 종목이 있으면 거래소(CompanyEntity.market)→markets.id로 해소, 폴백 쿼리는 안 친다.
+    db = _RowsDB([(3,), (4,)])
+    assert await resolve_market_ids(db, [99], "국내") == [3, 4]
+    assert db.execute_calls == 1
+
+
+async def test_resolve_market_ids_overseas_fallback_to_global():
+    # 종목으로 못 잡고(첫 쿼리 빈 결과) 해외면 GLOBAL(8)로 폴백.
+    db = _RowsDB([], [(8,)])
+    assert await resolve_market_ids(db, [99], "해외") == [8]
+    assert db.execute_calls == 2
+
+
+async def test_resolve_market_ids_overseas_without_company():
+    # 종목이 없어도 해외면 GLOBAL 폴백(종목 쿼리는 건너뜀).
+    db = _RowsDB([(8,)])
+    assert await resolve_market_ids(db, [], "해외") == [8]
+    assert db.execute_calls == 1
+
+
+async def test_resolve_market_ids_domestic_marketwide_empty():
+    # 국내인데 종목이 없으면(시장 전체) 빈 리스트 — DB를 치지 않는다.
+    db = _RowsDB()
+    assert await resolve_market_ids(db, [], "국내") == []
+    assert db.execute_calls == 0

@@ -92,6 +92,12 @@ class HookLines(BaseModel):
 class ContentDraft(BaseModel):
     """호출 B의 LLM 직접 출력. label·question은 코드가 채우므로 답변만 받는다."""
 
+    title: str = Field(
+        description=(
+            "주린이가 한눈에 무슨 이슈인지 알 수 있는 제목 한 줄(30자 내외). "
+            "종목 추천·방향 예측·금지 표현을 쓰지 않는다(본문 규칙과 동일)."
+        )
+    )
     answers: list[str] = Field(
         description="head1~head4 답변을 순서대로 정확히 4개. 각 답변은 2~4문장(head1은 1~2문장)."
     )
@@ -115,6 +121,7 @@ class Head(BaseModel):
 class ContentResult(BaseModel):
     """최종 콘텐츠. heads = [{label, question, answer}] × 4 + 첫 줄 2변형 + 부가 블록."""
 
+    title: str = ""  # LLM 생성 이슈 제목. 누락 시 호출부가 원문 제목으로 폴백.
     heads: list[Head] = Field(default_factory=list)
     hook_lines: HookLines | None = None
     evidence_spans: list[EvidenceSpan] = Field(default_factory=list)

@@ -23,6 +23,7 @@ from app.db.queries import (
     get_unanalyzed_clusters,
     mark_news_analyzed,
     resolve_company_ids,
+    resolve_market_ids,
     resolve_sector_ids,
     save_issue_docent,
     save_news_analysis,
@@ -117,10 +118,17 @@ class NewsAnalyzer:
         )
         # relevance 필터: 비투자성(content 없음)이면 분류만 남기고 콘텐츠 적재는 건너뛴다.
         if content is not None:
+            # 온보딩 관심사 매칭용 백필 — market은 종목 거래소(해외는 GLOBAL 폴백)로,
+            # sector·company는 분류에서 해소한 id 재사용.
+            market_ids = await resolve_market_ids(db, company_ids, classification.origin)
             await save_issue_docent(
                 db,
                 cluster_id=cluster.id,
-                title=issue.main_article.title,
+                # LLM이 생성한 주린이용 제목. 누락 시 대표 기사 원문 제목으로 폴백.
+                title=content.title or issue.main_article.title,
+                market_ids=market_ids,
+                sector_ids=sector_ids,
+                company_ids=company_ids,
                 hook_lines=content.hook_lines.model_dump() if content.hook_lines else {},
                 content_heads=[h.model_dump() for h in content.heads],
                 connection_module=[c.model_dump() for c in content.connection_module],

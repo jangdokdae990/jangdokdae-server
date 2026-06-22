@@ -166,6 +166,7 @@ class ContentGenerator:
                 )
 
         return ContentResult(
+            title=draft.title,
             heads=_assemble_heads(specs, draft.answers),
             hook_lines=draft.hook_lines,
             evidence_spans=draft.evidence_spans,
