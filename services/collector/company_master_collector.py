@@ -200,3 +200,72 @@ async def sync_company_master(db: AsyncSession) -> dict[str, int]:
         await db.commit()
 
     return {"total": len(records), "existing": existing}
+
+
+# --- UNKNOWN 시장 재분류 ---
+
+# FDR KRX 리스팅이 주는 국내 거래소 값.
+DOMESTIC_KRX_MARKETS = frozenset({"KOSPI", "KOSDAQ", "KONEX"})
+
+
+def plan_reclassification(
+    unknown_codes: list[str], krx_market_map: dict[str, str]
+) -> tuple[dict[str, str], list[str]]:
+    """UNKNOWN 종목코드를 KRX 시장맵으로 (재분류 {code: market}, 비활성 [code])로 가른다."""
+    reclassify: dict[str, str] = {}
+    deactivate: list[str] = []
+    for code in unknown_codes:
+        market = krx_market_map.get(code)
+        if market in DOMESTIC_KRX_MARKETS:
+            reclassify[code] = market
+        else:
+            deactivate.append(code)
+    return reclassify, deactivate
+
+
+def _fetch_krx_market_map() -> dict[str, str]:
+    """FDR KRX 전체 리스팅 → {6자리 종목코드: 시장(KOSPI/KOSDAQ/KONEX)}. 동기 — to_thread로 호출."""
+    import FinanceDataReader as fdr
+
+    df = fdr.StockListing("KRX")
+    market_map: dict[str, str] = {}
+    for record in df.to_dict("records"):
+        code = str(record.get("Code") or record.get("Symbol") or "").strip().zfill(6)
+        market = str(record.get("Market") or "").strip().upper()
+        if code and market:
+            market_map[code] = market
+    return market_map
+
+
+async def reclassify_unknown_markets(db: AsyncSession) -> dict[str, int]:
+    """market='UNKNOWN' 국내 종목을 KRX 실거래소로 재분류, 미해결은 is_active=False.
+
+    UNKNOWN은 PyKRX KOSPI/KOSDAQ 분류에서 못 찾은 종목(KONEX·신규/상장폐지 등)이다. FDR KRX
+    리스팅의 Market으로 재매칭하고, 끝까지 안 잡히면(상장폐지 등) 온보딩 비노출로 정리한다.
+    """
+    rows = (
+        await db.execute(select(CompanyEntity).where(CompanyEntity.market == "UNKNOWN"))
+    ).scalars().all()
+    if not rows:
+        return {"unknown": 0, "reclassified": 0, "deactivated": 0}
+
+    krx_market_map = await asyncio.to_thread(_fetch_krx_market_map)
+    reclassify, _deactivate = plan_reclassification(
+        [r.stock_code for r in rows], krx_market_map
+    )
+
+    reclassified = 0
+    deactivated = 0
+    for entity in rows:
+        new_market = reclassify.get(entity.stock_code)
+        if new_market:
+            entity.market = new_market
+            reclassified += 1
+        else:
+            entity.is_active = False
+            deactivated += 1
+    await db.commit()
+
+    result = {"unknown": len(rows), "reclassified": reclassified, "deactivated": deactivated}
+    logger.info("UNKNOWN 재분류: %s", result)
+    return result
