@@ -68,7 +68,7 @@
 매트릭스 폭발(모델×입력×알고리즘×파라미터)을 직렬 게이트로 축소한다. **마감(월) 내 Gate 1을 우선 완료**(모델+입력 확정)하고, 시간 여유 시 Gate 2를 이어간다. 파라미터 스윕(Gate 3)은 §8.2로 분리한다.
 
 - **Gate 1 — 모델 컷 + 입력 구성 결정** *(월요일 필수)*: 후보 4모델 × {제목 단독, 제목+본문} 을 HDBSCAN 기본(라이브러리 디폴트) 파라미터로 **한국어 클러스터링 쌍별 F1** 측정 → 하위 모델 탈락 + **이긴 입력 구성 고정**. (교차언어 게이트는 영어 데이터 부재로 제거 — 위 데이터 실측 정정 참조.)
-- **Gate 2 — 알고리즘 비교** *(여유 시)*: 생존 모델 × {HDBSCAN, 그래프} 쌍별 F1(보조 ARI·NMI).
+- **Gate 2 — 알고리즘 비교** *(완료 2026-06-21)*: ko-sroberta·gemini × {HDBSCAN, 그래프} 쌍별 F1 → **HDBSCAN 채택**(ko-sroberta 0.610 vs 그래프 best 0.585, gemini도 동일). 구현 `evaluation/clusterers.py`·`gate2.py`, 결과 [02-gate2-result.md 후속 03](./03-gate2-result.md).
 - **폴백**: 게이트가 ΔF1 미미(예: ≤0.02)로 갈리지 않으면 운영성·비용으로 결정, 그래도 불명확하면 `gemini-embedding-001 + HDBSCAN`.
 
 후보 모델: **bge-m3 · multilingual-e5-large · gemini-embedding-001 · ko-sroberta(baseline)** (다국어 한·영 필수).

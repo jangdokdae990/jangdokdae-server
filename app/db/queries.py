@@ -6,7 +6,17 @@
 
 from datetime import date, datetime
 
-from sqlalchemy import ColumnElement, Text, any_, delete, or_, select, type_coerce, update
+from sqlalchemy import (
+    ColumnElement,
+    Text,
+    any_,
+    delete,
+    func,
+    or_,
+    select,
+    type_coerce,
+    update,
+)
 from sqlalchemy.dialects.postgresql import ARRAY as PG_ARRAY
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.exc import IntegrityError
@@ -28,8 +38,12 @@ from app.db.orm_models.user_interest_company import UserInterestCompany
 from app.db.orm_models.user_interest_market import UserInterestMarket
 from app.db.orm_models.user_interest_sector import UserInterestSector
 
-# 온보딩 시장 코드 → CompanyEntity.market(거래소) 매핑. 국내만 데이터 보유.
-MARKET_CODE_TO_EXCHANGES: dict[str, tuple[str, ...]] = {"KR": ("KOSPI", "KOSDAQ")}
+# 온보딩 시장 코드 → CompanyEntity.market(거래소) 매핑. 국내 거래소만 데이터 보유.
+# 해외(NASDAQ/SP500/US_ETF/GLOBAL)는 매핑이 없어 종목 필터 시 빈 결과로 수렴한다.
+MARKET_CODE_TO_EXCHANGES: dict[str, tuple[str, ...]] = {
+    "KOSPI": ("KOSPI",),
+    "KOSDAQ": ("KOSDAQ",),
+}
 
 
 def _escape_like(value: str) -> str:
@@ -73,6 +87,28 @@ async def save_news_embeddings(db: AsyncSession, id_to_vector: dict[int, list[fl
     )
     await db.commit()
     return len(id_to_vector)
+
+
+async def get_latest_cluster_members(db: AsyncSession) -> tuple[dict[int, set[int]], int]:
+    """직전 클러스터링 상태를 cluster id 승계용으로 로드한다.
+
+    반환: ({stable_id → 멤버 news_id 집합}, 다음 신규 stable_id).
+    가장 최근 run_date의 stable_id 있는 행을 직전 클러스터로 보고, 다음 id는 전체 max+1로 둔다
+    (재사용 방지). 이력이 없으면 ({}, 1).
+    """
+    latest = (await db.execute(select(func.max(NewsCluster.run_date)))).scalar()
+    next_id = ((await db.execute(select(func.max(NewsCluster.stable_id)))).scalar() or 0) + 1
+    if latest is None:
+        return {}, next_id
+    rows = (
+        await db.execute(
+            select(NewsCluster.stable_id, NewsCluster.member_news_ids)
+            .where(NewsCluster.run_date == latest)
+            .where(NewsCluster.stable_id.is_not(None))
+        )
+    ).all()
+    prev = {int(sid): set(members) for sid, members in rows}
+    return prev, next_id
 
 
 async def save_chunk_embeddings(db: AsyncSession, id_to_vector: dict[int, list[float]]) -> int:

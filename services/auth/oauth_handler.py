@@ -104,12 +104,10 @@ def get_oauth_handler(provider: str) -> OAuthHandler:
     # 순환 import 방지 — 팩토리 호출 시점에 구현체를 import한다.
     from services.auth.google_oauth import GoogleOAuthHandler
     from services.auth.kakao_oauth import KakaoOAuthHandler
-    from services.auth.naver_oauth import NaverOAuthHandler
 
     handlers: dict[str, type[OAuthHandler]] = {
         "kakao": KakaoOAuthHandler,
         "google": GoogleOAuthHandler,
-        "naver": NaverOAuthHandler,
     }
     handler_cls = handlers.get(provider)
     if handler_cls is None:
@@ -125,11 +123,6 @@ def get_oauth_handler(provider: str) -> OAuthHandler:
             settings.oauth_google_client_id,
             settings.oauth_google_client_secret,
             settings.oauth_google_redirect_uri,
-        ),
-        "naver": (
-            settings.oauth_naver_client_id,
-            settings.oauth_naver_client_secret,
-            settings.oauth_naver_redirect_uri,
         ),
     }[provider]
     return handler_cls(*credentials)

@@ -60,7 +60,8 @@ def body_vectors(
     dim: int,
 ) -> np.ndarray:
     """기사별 본문 청크 mean pooling 행렬. 본문 없는 행은 NaN(상위에서 제목으로 폴백)."""
-    path = _cache_path(cache_dir, tag, model, "body")
+    # 청크 파라미터가 본문 벡터를 바꾸므로 캐시 키에 포함한다(스윕 시 충돌 방지).
+    path = _cache_path(cache_dir, tag, model, f"body_c{chunk_size}_o{overlap}")
     if path.exists():
         return cast(np.ndarray, np.load(path))
 

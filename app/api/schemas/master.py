@@ -10,6 +10,8 @@ class MarketOut(ORMSchema):
     code: str
     name_ko: str
     name_en: str
+    description: str | None
+    tags: list[str]
 
 
 class SectorOut(ORMSchema):

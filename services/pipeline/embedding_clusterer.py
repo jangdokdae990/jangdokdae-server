@@ -17,8 +17,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
 from app.db.base import AsyncSessionLocal
-from app.db.queries import get_clusterable_news
+from app.db.queries import get_clusterable_news, get_latest_cluster_members
 from services.embedder.cluster import cluster_news, order_by_centrality, promote_singletons
+from services.embedder.cluster_tracking import assign_stable_ids
 from services.embedder.embedding_client import EmbeddingClient
 from services.embedder.news_embedder import NewsEmbedder
 from services.embedder.report_embedder import ReportEmbedder
@@ -55,16 +56,14 @@ class EmbeddingClusterer:
         self.report_embedder = report_embedder or ReportEmbedder(embedding_client)
 
     async def run(self, db: AsyncSession) -> EmbeddingClustererState:
-        errors: list[str] = []
-        news_embedded, chunks_embedded = await self._embed_parallel(errors)
+        """로컬 러너용 — 임베딩과 클러스터링을 한 흐름으로 실행한다.
 
-        # "당일 수집분" 창은 한 번만 계산해 dedup·클러스터링에 같은 값을 넘긴다 —
-        # 단계 간 처리 범위가 어긋나면 dedup 안 된 행이 클러스터에 섞인다.
-        since = now_kst() - timedelta(hours=settings.pipeline_window_hours)
-        duplicates_removed = await flag_duplicates_by_similarity(
-            db, settings.dedup_similarity_threshold, cutoff=since
-        )
-        clusters_formed, top_issues = await self._cluster_and_select(db, since)
+        운영(Airflow)은 embed()를 세션 배치 DAG에서, cluster()를 Asset 트리거 클러스터링 DAG에서
+        분리 실행한다(수집 시점 임베딩 / 이벤트 기반 재클러스터링). 여기선 둘을 이어 붙인다.
+        """
+        errors: list[str] = []
+        news_embedded, chunks_embedded = await self.embed(db, errors)
+        duplicates_removed, clusters_formed, top_issues = await self.cluster(db)
 
         logger.info(
             "EmbeddingClusterer 완료 news_embedded=%d chunks_embedded=%d duplicates=%d "
@@ -80,6 +79,28 @@ class EmbeddingClusterer:
             top_issues=top_issues,
             errors=errors,
         )
+
+    async def embed(self, db: AsyncSession, errors: list[str] | None = None) -> tuple[int, int]:
+        """수집 시점 임베딩 단계 — 뉴스·청크를 임베딩한다(세션 배치 DAG의 embed Task).
+
+        반환: (news_embedded, chunks_embedded). db는 시그니처 일관성을 위해 받지만 두 임베딩은
+        각자 독립 세션을 연다(병렬 안전).
+        """
+        return await self._embed_parallel(errors if errors is not None else [])
+
+    async def cluster(self, db: AsyncSession) -> tuple[int, int, list[int]]:
+        """이벤트 기반 클러스터링 단계 — 근접중복 제거 + 14일 윈도우 재클러스터링(클러스터링 DAG).
+
+        반환: (duplicates_removed, clusters_formed, top_issues). dedup은 최근 수집분(24h),
+        클러스터링은 최근 N일(14일) 윈도우 전체 재계산 + cluster id 승계.
+        """
+        dedup_since = now_kst() - timedelta(hours=settings.pipeline_window_hours)
+        duplicates_removed = await flag_duplicates_by_similarity(
+            db, settings.dedup_similarity_threshold, cutoff=dedup_since
+        )
+        cluster_since = now_kst() - timedelta(days=settings.cluster_window_days)
+        clusters_formed, top_issues = await self._cluster_and_select(db, cluster_since)
+        return duplicates_removed, clusters_formed, top_issues
 
     async def _embed_parallel(self, errors: list[str]) -> tuple[int, int]:
         """두 임베딩을 독립 세션에서 병렬 실행한다. 한쪽 실패는 errors에 담고 0으로 처리한다."""
@@ -129,6 +150,14 @@ class EmbeddingClusterer:
         labels = promote_singletons(labels)  # noise(-1)도 size-1 클러스터로 보존
 
         scored = self._score_clusters(labels, news_ids, embeddings)
+
+        # cluster id 승계 — 직전 클러스터와 멤버 겹침으로 안정 id를 이어준다(설계 05 §5.1a).
+        prev_members, next_stable_id = await get_latest_cluster_members(db)
+        member_sets = [set(c.member_news_ids) for c in scored]
+        stable_ids, _ = assign_stable_ids(member_sets, prev_members, next_stable_id)
+        for cluster, sid in zip(scored, stable_ids, strict=True):
+            cluster.stable_id = sid
+
         top_issues = await persist_clusters(db, now_kst().date(), scored)
         return len(scored), top_issues
 
