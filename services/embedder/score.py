@@ -16,8 +16,14 @@ from services.collector.tools.save_tool import upsert_news_clusters
 
 logger = logging.getLogger(__name__)
 
-# 신호별 가중치 — 휴리스틱 초기값(실데이터 교정 전).
-W = {"volume": 0.4, "velocity": 0.3, "sentiment": 0.15, "entity": 0.15}
+# 신호별 가중치 — 휴리스틱 초기값(설계 05 §6.1). 매직넘버 대신 config로 분리해 무배포 교정 가능.
+# 기본값이 운영 정본이며 합=1.0. 테스트·평가가 이 dict를 직접 참조하므로 형태는 유지한다.
+W = {
+    "volume": settings.score_weight_volume,
+    "velocity": settings.score_weight_velocity,
+    "sentiment": settings.score_weight_sentiment,
+    "entity": settings.score_weight_entity,
+}
 
 
 @dataclass
