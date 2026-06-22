@@ -1,7 +1,8 @@
-"""메인 파이프라인 DAG — 매일(주말 포함) 00:00·09:00·12:00·15:30 KST, 1 run = 전체 완주.
+"""세션 배치 DAG — 매일(주말 포함) 00:00·09:00·12:00·15:30 KST 수집·임베딩.
 
-흐름: [collect_news, collect_company] >> embed_cluster (분석은 미구현 TODO).
-각 Task가 단계를 직접 호출하고, 단계 간 데이터는 공유 DB(Neon) 상태로만 핸드오프한다.
+흐름: [collect_news, collect_company] >> embed. embed는 EMBED_ASSET을 produce하고, 클러스터링은
+별도 이벤트 기반 DAG(jangdokdae_clustering)가 그 Asset을 consume해 수행한다(수집 시점 임베딩 /
+이벤트 기반 재클러스터링 분리). 각 Task가 단계를 직접 호출하고, 데이터는 공유 DB(Neon)로만 핸드오프.
 
 Airflow 코어(SQLAlchemy 1.4)와 앱(SQLAlchemy 2.0)이 충돌하므로 단계 실행은
 ExternalPythonOperator로 앱 전용 venv에서 돌린다. callable은 venv에서 직렬화 실행되므로
@@ -17,6 +18,7 @@ import pendulum
 from airflow.providers.standard.operators.python import ExternalPythonOperator
 from airflow.sdk import DAG
 from airflow.timetables.trigger import MultipleCronTriggerTimetable
+from assets import EMBED_ASSET
 
 # 매일(주말 포함) 장 운영 시간대 4구간 경계에 트리거 — 각 run의 트리거 시각이 해당
 # 구간에 들어가 market_session 라벨(premarket/morning/afternoon/afterhours)과 자동 정합한다.
@@ -64,7 +66,7 @@ def _collect_company() -> None:
     asyncio.run(CompanyCollector().run(schedule))
 
 
-def _embed_cluster() -> None:
+def _embed() -> None:
     import asyncio
     import sys
 
@@ -74,7 +76,7 @@ def _embed_cluster() -> None:
 
     async def _run() -> None:
         async with AsyncSessionLocal() as db:
-            await EmbeddingClusterer().run(db)
+            await EmbeddingClusterer().embed(db)  # 임베딩만 — 클러스터링은 Asset 트리거 DAG
 
     asyncio.run(_run())
 
@@ -100,11 +102,12 @@ with DAG(
         python_callable=_collect_company,
         expect_airflow=False,
     )
-    embed_cluster = ExternalPythonOperator(
-        task_id="embed_cluster",
+    # embed 완료 시 EMBED_ASSET을 produce → 클러스터링 DAG가 이벤트로 트리거된다.
+    embed = ExternalPythonOperator(
+        task_id="embed",
         python=APP_PYTHON,
-        python_callable=_embed_cluster,
+        python_callable=_embed,
         expect_airflow=False,
+        outlets=[EMBED_ASSET],
     )
-    # TODO: analyze Task — NewsAnalysisAgent 구현 후 embed_cluster >> analyze 연결
-    [collect_news, collect_company] >> embed_cluster
+    [collect_news, collect_company] >> embed
