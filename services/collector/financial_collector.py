@@ -13,6 +13,7 @@ import httpx
 from app.config import settings
 from services.collector.stock_symbols import ALL_STOCKS, StockSymbol
 from services.collector.tools.redact import redact_secrets
+from services.collector.tools.with_retry import with_retry
 
 logger = logging.getLogger(__name__)
 
@@ -44,6 +45,7 @@ class CollectedFinancial:
     net_income: int | None
     total_assets: int | None
     rcept_no: str | None = None  # 원천 사업보고서 접수번호 (추적 키)
+    fs_div: str | None = None  # 수치 출처 재무제표 구분 (CFS=연결 / OFS=개별)
 
     def to_record(self) -> dict[str, object]:
         # save_tool.upsert_financial_statements / FinancialStatement 컬럼 입력 형식
@@ -57,6 +59,7 @@ class CollectedFinancial:
             "operating_income": self.operating_income,
             "net_income": self.net_income,
             "total_assets": self.total_assets,
+            "fs_div": self.fs_div,
         }
 
 
@@ -96,9 +99,11 @@ class FinancialCollector:
         # 연결재무제표(CFS) 우선, 없으면 개별재무제표(OFS) 폴백.
         # 종속회사가 없어 연결을 작성하지 않는 기업은 CFS가 013(데이터 없음)이라
         # CFS만 조회하면 재무 수치가 통째로 누락된다.
-        accounts = await self._fetch_accounts(client, company, bsns_year, reprt_code, "CFS")
+        fs_div = "CFS"
+        accounts = await self._fetch_accounts(client, company, bsns_year, reprt_code, fs_div)
         if accounts is None:
-            accounts = await self._fetch_accounts(client, company, bsns_year, reprt_code, "OFS")
+            fs_div = "OFS"
+            accounts = await self._fetch_accounts(client, company, bsns_year, reprt_code, fs_div)
         if accounts is None:
             logger.warning(
                 "재무제표 없음 corp_code=%s year=%s (CFS·OFS 모두 데이터 없음)",
@@ -116,8 +121,10 @@ class FinancialCollector:
             net_income=self._extract(accounts, *_METRICS["net_income"]),
             total_assets=self._extract(accounts, *_METRICS["total_assets"]),
             rcept_no=self._extract_rcept_no(accounts),
+            fs_div=fs_div,  # 수치를 실제로 취한 재무제표 구분 보존
         )
 
+    @with_retry(max_attempts=2, retry_on=httpx.TransportError)
     async def _fetch_accounts(
         self,
         client: httpx.AsyncClient,
@@ -126,7 +133,11 @@ class FinancialCollector:
         reprt_code: str,
         fs_div: str,
     ) -> list[dict] | None:
-        """단일 fs_div(CFS/OFS) 재무 계정 목록을 조회. 데이터 없으면 None."""
+        """단일 fs_div(CFS/OFS) 재무 계정 목록을 조회. 데이터 없으면 None.
+
+        일시 네트워크 오류(TransportError)만 1회 더 시도해 흡수한다 — 4xx/5xx·
+        status=013(데이터 없음)은 전파하여 Airflow Task 재시도/폴백에 맡긴다.
+        """
         params = {
             "crtfc_key": settings.opendart_api_key,
             "corp_code": company.corp_code,

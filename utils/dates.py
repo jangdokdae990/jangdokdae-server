@@ -26,13 +26,14 @@ def now_kst() -> datetime:
 def market_session(dt: datetime) -> str:
     """KST 벽시계 기준 시각을 4개 장 운영 시간대 라벨로 분류한다.
 
-    보고·로그용 식별자이며 수집 동작은 가르지 않는다(tzinfo는 무시, 벽시계 시각만 본다):
+    보고·로그용 식별자이며 수집 동작은 가르지 않는다. aware 입력은 KST로 변환,
+    naive 입력은 KST 벽시계로 간주한다(to_naive_kst):
         premarket   00:00~09:00  장 시작 전
         morning     09:00~12:00  오전장
         afternoon   12:00~15:30  오후장
         afterhours  15:30~24:00  장 마감 후
     """
-    t = dt.time()
+    t = to_naive_kst(dt).time()
     if t < _MARKET_OPEN:
         return "premarket"
     if t < _LUNCH_SPLIT:
@@ -40,3 +41,8 @@ def market_session(dt: datetime) -> str:
     if t < _MARKET_CLOSE:
         return "afternoon"
     return "afterhours"
+
+
+def current_market_session() -> str:
+    """현재 KST 시각의 장 운영 시간대 라벨을 반환. market_session(now_kst()) 단축형."""
+    return market_session(now_kst())

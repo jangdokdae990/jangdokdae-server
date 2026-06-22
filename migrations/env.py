@@ -21,6 +21,7 @@ from app.db.orm_models import (  # noqa: F401
     issue_docent,
     industry,
     industry_group,
+    market,
     market_indicator,
     news,
     news_analysis,
@@ -28,6 +29,10 @@ from app.db.orm_models import (  # noqa: F401
     report_chunk,
     sector,
     stock_price,
+    user,
+    user_interest_company,
+    user_interest_market,
+    user_interest_sector,
 )
 
 config = context.config

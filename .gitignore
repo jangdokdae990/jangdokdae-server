@@ -40,6 +40,7 @@ htmlcov/
 # 로그
 *.log
 logs/
+dev-logs/
 
 # 기타
 tmp/
@@ -48,6 +49,12 @@ temp/
 
 # 임베딩 모델 비교 라벨셋 — 실데이터(수집 뉴스 제목)는 커밋 금지, example만 추적
 scripts/data/embedding_labelset.json
+
+# 베이크오프 골드셋 — 수집 뉴스 본문 포함된 생성 데이터, 커밋 금지(review.md만 추적)
+scripts/data/goldset_*.json
+
+# 베이크오프 임베딩 캐시 — 모델별 .npy(수MB×N), 재생성 가능해 커밋 안 함
+evaluation/cache/
 
 # 시각화·분석 산출물 (HTML/PNG/md) — 재생성 가능, 뉴스 제목 포함될 수 있어 커밋 안 함
 output/

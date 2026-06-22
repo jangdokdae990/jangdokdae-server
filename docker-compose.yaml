@@ -33,6 +33,7 @@ x-airflow-common: &airflow-common
     - ./app:/opt/jangdokdae/app          # app/credentials/vertex_key.json 포함
     - ./services:/opt/jangdokdae/services
     - ./utils:/opt/jangdokdae/utils
+    - ./config:/opt/jangdokdae/config    # feeds/news_filter/news_body.yaml 정본
     - ./prompts:/opt/jangdokdae/prompts
     - ./logs:/opt/airflow/logs           # 실행 로그 영속화
   # user 미지정 → 이미지 기본 사용자(airflow, uid 50000)로 실행. 호스트 uid를 강제하면

@@ -73,8 +73,12 @@ async def _upsert(
 
 
 async def upsert_news(db: AsyncSession, records: list[dict]) -> int:
-    """뉴스 레코드를 url 기준 UPSERT. records는 CollectedNews.to_record() 형식."""
-    return await _upsert(db, News, records, ["url"])
+    """뉴스 레코드를 guid 기준 UPSERT. records는 CollectedNews.to_record() 형식.
+
+    guid가 수집-시점 정확 중복키다(피드 GUID, 없으면 정규화 URL — 전처리에서 폴백). url은
+    unique가 아니라(일반 인덱스) 충돌키로 못 쓴다. DO NOTHING은 배치 내 동일 guid도 멱등 처리.
+    """
+    return await _upsert(db, News, records, ["guid"])
 
 
 async def upsert_stock_prices(db: AsyncSession, records: list[dict]) -> int:

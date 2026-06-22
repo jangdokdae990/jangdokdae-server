@@ -10,6 +10,8 @@ from collections.abc import Iterable
 
 import httpx
 import trafilatura
+from lxml import html as lxml_html
+from lxml.etree import LxmlError
 
 from services.collector.tools.with_retry import with_retry
 from utils.http import USER_AGENT
@@ -19,6 +21,34 @@ logger = logging.getLogger(__name__)
 DEFAULT_TIMEOUT = 10.0
 # 추출 본문이 이보다 짧으면 페이월·추출 실패로 보고 다음 후보로 넘어간다.
 MIN_BODY_LENGTH = 200
+
+
+def _extract_body(html_text: str) -> str | None:
+    """HTML에서 기자 작성 기사 본문만 추출한다.
+
+    schema.org `itemprop="articleBody"` 컨테이너가 있으면 **그 안만** 추출한다 — 글자크기·
+    시세(증권정보)·관련기사·AI 자동요약 등 본문 밖 위젯을 구조 단계에서 배제하기 위함이다.
+    컨테이너가 여러 개면 모두 이어 붙여 추출한다(본문이 여러 블록으로 쪼개진 기사 보존).
+
+    컨테이너 추출 결과가 비면(favor_precision이 짧은 단편을 버리는 경우 등) 기사 누락을 막기
+    위해 전체 HTML에서 재추출한다 — 본문 밖 위젯이 섞이더라도 본문이 통째로 사라지는 것보다 낫다.
+    컨테이너가 아예 없을 때도 전체 HTML에서 추출한다.
+
+    `favor_precision`으로 정밀도를 높여(경계의 페이지 잡음 제거) 짧은 본문도 안정적으로 뽑는다.
+    """
+    try:
+        doc = lxml_html.fromstring(html_text)
+        nodes = doc.xpath('//*[@itemprop="articleBody"]')
+    except (LxmlError, ValueError):
+        nodes = []
+    if nodes:
+        fragment = "\n".join(
+            lxml_html.tostring(node, encoding="unicode") for node in nodes
+        )
+        body = trafilatura.extract(fragment, favor_precision=True)
+        if body:
+            return body
+    return trafilatura.extract(html_text, favor_precision=True)
 
 
 def _make_client(timeout: float) -> httpx.AsyncClient:
@@ -56,8 +86,8 @@ async def fetch_article_body(
         if owns_client:
             await client.aclose()
 
-    # trafilatura.extract는 동기 CPU 작업 — 이벤트 루프 블로킹 방지로 스레드에 오프로드.
-    body = await asyncio.to_thread(trafilatura.extract, html)
+    # _extract_body(lxml+trafilatura)는 동기 CPU 작업 — 이벤트 루프 블로킹 방지로 스레드 오프로드.
+    body = await asyncio.to_thread(_extract_body, html)
     if not body or len(body) < MIN_BODY_LENGTH:
         logger.info("본문 추출 부족(페이월 가능) url=%s len=%d", url, len(body or ""))
         return None
