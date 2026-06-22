@@ -57,10 +57,11 @@ def _classification(cluster_id: int, relevant: bool = True) -> ClassificationRes
 
 
 class _FakeGraph:
-    def __init__(self, fail_on=(), review_on=(), irrelevant_on=()):
+    def __init__(self, fail_on=(), review_on=(), irrelevant_on=(), low_source_on=()):
         self.fail_on = set(fail_on)
         self.review_on = set(review_on)  # generation_review=True 강제(가드 실패 시뮬)
         self.irrelevant_on = set(irrelevant_on)  # 비투자성 → generate 건너뜀(content 없음)
+        self.low_source_on = set(low_source_on)  # 본문 부족 → generate 건너뜀(투자관련, content 없음)
 
     async def ainvoke(self, state):
         issue = state["issue"]
@@ -70,6 +71,9 @@ class _FakeGraph:
         if issue.cluster_id in self.irrelevant_on:
             # 실제 그래프의 조건부 분기: 비투자성이면 generate 생략 → content 키 없음.
             return {"classification": _classification(issue.cluster_id, relevant=False)}
+        if issue.cluster_id in self.low_source_on:
+            # 본문 부족: 투자관련이지만 그래프가 generate를 건너뛰어 content 키 없음.
+            return {"classification": _classification(issue.cluster_id), "source_insufficient": True}
         return {
             "classification": _classification(issue.cluster_id),
             "content": _content(),
@@ -180,6 +184,24 @@ async def test_generation_review_forces_needs_review(patched):
     # cluster 1(가드 실패) + cluster 2(저신뢰) 둘 다 needs_review.
     assert state["needs_review"] == 2
     assert patched["analysis"][0]["needs_review"] is True
+
+
+async def test_run_marks_low_source_needs_review(patched):
+    # cluster 1이 본문 부족 → 생성 skip, 분류만 needs_review로 적재, issue_docent 미적재.
+    analyzer = NewsAnalyzer(graph=_FakeGraph(low_source_on=[1]), body_fetcher=_fake_fetch)
+    db = _FakeDB()
+    state = await analyzer.run(db)
+
+    assert state["analyzed"] == 2
+    assert state["low_source"] == 1
+    # 분류는 2건 적재되나 콘텐츠는 1건만(본문 부족 cluster 1 생략).
+    assert len(patched["analysis"]) == 2
+    assert len(patched["docent"]) == 1
+    # 본문 부족 분류행은 needs_review=True로 격리.
+    low = next(a for a in patched["analysis"] if a["cluster_id"] == 1)
+    assert low["needs_review"] is True
+    # 멤버는 분석 완료로 표시(재처리 방지).
+    assert patched["marks"] == [[10, 11], [20]]
 
 
 async def test_run_skips_irrelevant(patched):

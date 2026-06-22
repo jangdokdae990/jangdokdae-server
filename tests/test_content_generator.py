@@ -194,3 +194,39 @@ def test_generate_with_guard_flags_review_after_retry():
         _issue(), _opinion_classification()
     )
     assert review is True
+
+
+def test_count_blank_heads_counts_honest_blank_answers():
+    answers = [
+        "이 기사는 목표주가를 담고 있지 않습니다.",  # blank
+        "삼성전자 영업이익이 9.2조로 늘었습니다.",      # 정상
+        "구체적인 정보가 없습니다.",                    # blank
+        "앞으로 반도체 가격을 보면 됩니다.",            # 정상
+    ]
+    assert frames.count_blank_heads(answers) == 2
+
+
+def test_generate_with_guard_flags_review_on_blank_heads():
+    # 원문에 내용이 없어 다수 head가 honest-blank → 재생성 없이 needs_review로 격리.
+    draft = ContentDraft(
+        title="t",
+        answers=[
+            "이 기사는 목표주가를 담고 있지 않습니다.",
+            "현재 주가 대비 판단하기 어렵습니다.",
+            "구체적인 정보가 없습니다.",
+            "앞으로 볼 지표를 제시하고 있지 않습니다.",
+        ],
+        hook_lines=HookLines(pain="p", neutral="n"),
+    )
+    content, review = ContentGenerator(generator=_FakeChain(draft)).generate_with_guard(
+        _issue(), _classification("EARNINGS")  # 비-OPINION이라 OPINION 가드는 통과
+    )
+    assert review is True
+
+
+def test_generate_with_guard_passes_substantive_content():
+    # 정상 콘텐츠(honest-blank 없음, 비-OPINION)는 발행 유지 — review False.
+    content, review = ContentGenerator(generator=_FakeChain(_draft())).generate_with_guard(
+        _issue(), _classification("EARNINGS")
+    )
+    assert review is False
