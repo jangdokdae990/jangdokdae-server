@@ -55,6 +55,10 @@ class Settings(BaseSettings):
     classification_confidence_threshold: float = 0.5  # 미만이면 needs_review(검수 큐)
     llm_request_delay_seconds: float = 0.5  # 이슈 간 호출 간격(rate limit 완화)
     llm_max_retries: int = 6  # langchain(Vertex) 429 지수 백오프 재시도 횟수
+    # 발행 품질 게이트 — head 4개 중 honest-blank("기사에 …없습니다")가 이 수 이상이면 needs_review.
+    max_blank_heads: int = 2
+    # 대표 기사 본문이 이 글자 수 미만이면 원문 부족 — 생성 건너뛰고 needs_review(설계 15).
+    min_source_body_chars: int = 200
 
     # --- SPOF 전환 메트릭 계기판 (설계 00 §11.5) ---
     # 단일 호스트 docker-compose(LocalExecutor)의 한계 임계 — 결함이 아니라 측정값이 닿으면

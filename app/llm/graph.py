@@ -14,6 +14,7 @@ import asyncio
 
 from langgraph.graph import END, StateGraph
 
+from app.config import settings
 from app.llm.state import AnalysisState
 from services.analyzer.classifier import NewsClassifier
 from services.analyzer.content_generator import ContentGenerator
@@ -32,7 +33,10 @@ def build_analysis_graph(
 
     async def classify_node(state: AnalysisState) -> dict:
         result = await asyncio.to_thread(clf.classify, state["issue"])
-        return {"classification": result}
+        # 대표 기사 본문이 임계 미만이면 생성은 honest-blank로 수렴 → 사전 차단 표식.
+        body = state["issue"].main_article.body or ""
+        insufficient = len(body.strip()) < settings.min_source_body_chars
+        return {"classification": result, "source_insufficient": insufficient}
 
     async def enrich_node(state: AnalysisState) -> dict:
         ctx = await enr.enrich(state["db"], state["classification"], state["issue"])
@@ -48,12 +52,17 @@ def build_analysis_graph(
         return {"content": content, "generation_review": review}
 
     def route_after_classify(state: AnalysisState) -> str:
-        """비투자성(is_investment_relevant=false)이면 생성을 건너뛰고 종료(relevance 필터).
+        """생성(enrich·generate)을 건너뛰고 종료할지 결정 — content가 비는 상태로 끝난다.
 
-        분류만 남기고 enrich·generate(LLM 호출)를 생략한다. content가 비는 상태로 끝나며,
-        NewsAnalyzer가 이를 보고 issue_docent 적재를 건너뛴다(설계 평가 04).
+        ① 비투자성(is_investment_relevant=false): relevance 필터 — issue_docent 미적재(평가 04).
+        ② 원문 본문 부족(source_insufficient): 생성해도 honest-blank라 LLM 호출을 아끼고 종료,
+           NewsAnalyzer가 needs_review로 격리한다(설계 15). 두 경우 모두 NewsAnalyzer가 사유를 구분.
         """
-        return "enrich" if state["classification"].is_investment_relevant else "skip"
+        if not state["classification"].is_investment_relevant:
+            return "skip"
+        if state.get("source_insufficient"):
+            return "skip"
+        return "enrich"
 
     graph = StateGraph(AnalysisState)
     graph.add_node("classify", classify_node)

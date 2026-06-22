@@ -49,7 +49,6 @@ MARKET_CODE_TO_EXCHANGES: dict[str, tuple[str, ...]] = {
     "US_ETF": ("US_ETF",),
 }
 
-
 def _escape_like(value: str) -> str:
     """LIKE 메타문자(\\,%,_)를 이스케이프 — 사용자 입력이 와일드카드로 해석되지 않게 한다.
 
@@ -304,18 +303,28 @@ async def save_issue_docent(
     *,
     cluster_id: int,
     title: str,
+    market_ids: list[int],
+    sector_ids: list[int],
+    company_ids: list[int],
     hook_lines: dict,
     content_heads: list[dict],
     connection_module: list[dict],
     evidence_spans: list[dict],
     term_spans: list[dict],
 ) -> None:
-    """생성 콘텐츠를 적재(클러스터당 1행, 중복 시 무시)."""
+    """생성 콘텐츠를 적재(클러스터당 1행, 중복 시 무시).
+
+    market_ids·sector_ids·company_ids는 온보딩 관심사 기반 피드 필터의 조인 키 —
+    분류 단계에서 해소된 값을 그대로 받는다(news_analysis와 동일 소스).
+    """
     stmt = (
         pg_insert(IssueDocent)
         .values(
             cluster_id=cluster_id,
             title=title,
+            market_ids=market_ids,
+            sector_ids=sector_ids,
+            company_ids=company_ids,
             hook_lines=hook_lines,
             content_heads=content_heads,
             connection_module=connection_module,
@@ -385,6 +394,37 @@ async def resolve_sector_ids(db: AsyncSession, names: list[str]) -> list[int]:
         return []
     result = await db.execute(select(Sector.id).where(Sector.name_ko.in_(wanted)))
     return sorted({row[0] for row in result.all()})
+
+
+# 종목으로 market이 안 잡히는 해외 이슈의 폴백 — markets.code "GLOBAL"(기타 해외 시장).
+_OVERSEAS_FALLBACK_MARKET_CODE = "GLOBAL"
+
+
+async def resolve_market_ids(
+    db: AsyncSession, company_ids: list[int], origin: str
+) -> list[int]:
+    """이슈와 연관된 markets.id를 해소 — issue_docent 관심사 매칭 백필.
+
+    종목의 거래소(CompanyEntity.market: KOSPI/KOSDAQ)를 markets.code와 일치시켜 해소한다
+    (종목 유니버스는 국내뿐이라 종목 기반은 KOSPI/KOSDAQ로 수렴). 종목으로 못 잡고 origin이
+    해외면 GLOBAL(기타 해외 시장)로 폴백, 국내인데 종목이 없으면 빈 리스트(시장 전체 등).
+    """
+    if company_ids:
+        result = await db.execute(
+            select(Market.id)
+            .join(CompanyEntity, CompanyEntity.market == Market.code)
+            .where(CompanyEntity.id.in_(company_ids))
+            .distinct()
+        )
+        ids = sorted({row[0] for row in result.all()})
+        if ids:
+            return ids
+    if origin == "해외":
+        result = await db.execute(
+            select(Market.id).where(Market.code == _OVERSEAS_FALLBACK_MARKET_CODE)
+        )
+        return sorted({row[0] for row in result.all()})
+    return []
 
 
 async def get_latest_stock_price(db: AsyncSession, stock_code: str) -> StockPrice | None:

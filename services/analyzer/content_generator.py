@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import logging
 
+from app.config import settings
 from app.llm.chains import make_generator
 from app.llm.prompt_loader import load_prompt
 from services.analyzer import frames
@@ -58,6 +59,16 @@ def _dedup_term_spans(spans: list[TermSpan]) -> list[TermSpan]:
         seen.add(span.term)
         deduped.append(span)
     return deduped
+
+
+def _filter_term_spans_in_body(spans: list[TermSpan], answers: list[str]) -> list[TermSpan]:
+    """content_heads 본문(answers)에 실제 등장하는 term만 남긴다.
+
+    LLM이 term_tags엔 있으나 본문엔 쓰지 않은 용어까지 term_spans로 내보내는 경우가 있어,
+    본문에 없는 term을 걸러 프런트가 본문에 없는 용어를 하이라이트하는 일을 막는다.
+    """
+    body = " ".join(answers)
+    return [s for s in spans if s.term and s.term in body]
 
 
 def opinion_guard_ok(classification: ClassificationResult, content: ContentResult) -> bool:
@@ -165,11 +176,20 @@ class ContentGenerator:
                     "cluster=%s head%d 금지 표현 검출: %s", issue.cluster_id, i, hits
                 )
 
+        # term_spans는 본문에 실제 등장하는 용어만 남긴다(본문에 없는 용어 하이라이트 방지) → 중복 제거.
+        in_body = _filter_term_spans_in_body(draft.term_spans, draft.answers)
+        dropped = [s.term for s in draft.term_spans if s not in in_body]
+        if dropped:
+            logger.warning(
+                "cluster=%s 본문 미등장 term_spans 제거: %s", issue.cluster_id, dropped
+            )
+
         return ContentResult(
+            title=draft.title,
             heads=_assemble_heads(specs, draft.answers),
             hook_lines=draft.hook_lines,
             evidence_spans=draft.evidence_spans,
-            term_spans=_dedup_term_spans(draft.term_spans),  # 같은 용어 반복 제거
+            term_spans=_dedup_term_spans(in_body),  # 본문 정합 후 같은 용어 반복 제거
             connection_module=draft.connection_module,
         )
 
@@ -179,16 +199,26 @@ class ContentGenerator:
         classification: ClassificationResult,
         enrichment: dict | None = None,
     ) -> tuple[ContentResult, bool]:
-        """generate + OPINION 1단 종목 가드. 실패 시 1회 재생성, 그래도 실패면 (content, True).
+        """generate + 발행 품질 가드. 반환 두 번째 값 = needs_review 여부.
 
-        반환 두 번째 값 = needs_review 여부(가드 최종 실패).
+        OPINION 1단 종목 가드는 실패 시 1회 재생성한다. 그 후 honest-blank 게이트를 적용 —
+        원문에 내용이 없어 다수 head가 회피 답변이면 재생성해도 무의미하므로 needs_review로만
+        격리한다(설계 15). 둘 중 하나라도 걸리면 review=True.
         """
         content = self.generate(issue, classification, enrichment)
-        if opinion_guard_ok(classification, content):
-            return content, False
-        logger.warning("OPINION 1단 종목명 누락 — 재생성 cluster=%s", issue.cluster_id)
-        content = self.generate(issue, classification, enrichment)
-        if opinion_guard_ok(classification, content):
-            return content, False
-        logger.warning("OPINION 1단 종목명 재생성 후에도 누락 cluster=%s", issue.cluster_id)
-        return content, True
+        guard_review = not opinion_guard_ok(classification, content)
+        if guard_review:
+            logger.warning("OPINION 1단 종목명 누락 — 재생성 cluster=%s", issue.cluster_id)
+            content = self.generate(issue, classification, enrichment)
+            guard_review = not opinion_guard_ok(classification, content)
+            if guard_review:
+                logger.warning("OPINION 1단 종목명 재생성 후에도 누락 cluster=%s", issue.cluster_id)
+
+        blank = frames.count_blank_heads([h.answer for h in content.heads])
+        blank_review = blank >= settings.max_blank_heads
+        if blank_review:
+            logger.warning(
+                "honest-blank head %d개(임계 %d) — 발행 무가치, needs_review cluster=%s",
+                blank, settings.max_blank_heads, issue.cluster_id,
+            )
+        return content, guard_review or blank_review
