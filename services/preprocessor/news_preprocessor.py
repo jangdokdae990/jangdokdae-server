@@ -33,8 +33,8 @@ _PUNCT_PATTERN = re.compile(r"[^\w\s]")
 
 # ── 정규화 (Step 1·2) ───────────────────────────────────────────────────────
 def clean_title(title: str) -> str:
-    """제목의 HTML 엔티티를 디코드하고 태그를 제거한다."""
-    if not title:
+    """제목의 HTML 엔티티를 디코드하고 태그를 제거한다. 비문자열·빈 입력은 빈 문자열로 방어."""
+    if not isinstance(title, str) or not title:
         return ""
     text = html.unescape(title)        # &amp; → &
     text = _TAG_PATTERN.sub("", text)  # <b> 등 태그 제거
