@@ -48,12 +48,12 @@ def guest_client():
 
 def test_markets_allow_guest(guest_client, monkeypatch):
     async def fake(_db):
-        return [SimpleNamespace(id=1, code="KR", name_ko="국내", name_en="Domestic")]
+        return [SimpleNamespace(id=3, code="KOSPI", name_ko="코스피", name_en="KOSPI")]
 
     monkeypatch.setattr("app.api.routers.masters.get_active_markets", fake)
     res = guest_client.get("/api/v1/markets")
     assert res.status_code == 200
-    assert res.json()[0]["code"] == "KR"
+    assert res.json()[0]["code"] == "KOSPI"
 
 
 def test_companies_next_cursor_set_when_full_page(guest_client, monkeypatch):

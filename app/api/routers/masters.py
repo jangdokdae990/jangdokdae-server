@@ -40,7 +40,7 @@ async def list_companies(
     db: AsyncSession = Depends(get_db),
     _: int | None = Depends(get_current_user_optional),
     sector: int | None = Query(default=None, description="섹터 id 필터"),
-    market: str | None = Query(default=None, description="시장 코드(KR 등)"),
+    market: str | None = Query(default=None, description="시장 코드(KOSPI/KOSDAQ 등)"),
     q: str | None = Query(default=None, description="종목명·코드 검색"),
     limit: int = Query(default=_COMPANY_PAGE_DEFAULT, ge=1, le=_COMPANY_PAGE_MAX),
     cursor: int | None = Query(default=None, description="직전 페이지 마지막 id"),

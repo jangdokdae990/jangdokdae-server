@@ -28,9 +28,6 @@ from app.db.orm_models.user_interest_company import UserInterestCompany
 from app.db.orm_models.user_interest_market import UserInterestMarket
 from app.db.orm_models.user_interest_sector import UserInterestSector
 
-# 온보딩 시장 코드 → CompanyEntity.market(거래소) 매핑. 국내만 데이터 보유.
-MARKET_CODE_TO_EXCHANGES: dict[str, tuple[str, ...]] = {"KR": ("KOSPI", "KOSDAQ")}
-
 
 def _escape_like(value: str) -> str:
     """LIKE 메타문자(\\,%,_)를 이스케이프 — 사용자 입력이 와일드카드로 해석되지 않게 한다.
@@ -545,16 +542,15 @@ async def search_companies(
 ) -> list[CompanyEntity]:
     """활성 종목을 필터·검색·커서 페이지네이션으로 조회.
 
-    market_code(국내=KR)는 거래소(KOSPI/KOSDAQ)로 풀어 필터한다. cursor는 직전 페이지
-    마지막 id로, id 오름차순에서 그 다음부터 limit개를 가져온다.
+    market_code는 markets.code(거래소·지수)이고 CompanyEntity.market(KOSPI/KOSDAQ)과 동일
+    값이라 그대로 비교한다. 종목 유니버스가 국내뿐이라 해외 코드(NASDAQ 등)는 빈 결과로 수렴한다.
+    cursor는 직전 페이지 마지막 id로, id 오름차순에서 그 다음부터 limit개를 가져온다.
     """
     stmt = select(CompanyEntity).where(CompanyEntity.is_active.is_(True))
     if sector_id is not None:
         stmt = stmt.where(CompanyEntity.sector_id == sector_id)
     if market_code is not None:
-        exchanges = MARKET_CODE_TO_EXCHANGES.get(market_code, ())
-        # 매핑 없는 시장(해외 등)은 보유 데이터가 없어 빈 결과로 수렴시킨다.
-        stmt = stmt.where(CompanyEntity.market.in_(exchanges))
+        stmt = stmt.where(CompanyEntity.market == market_code)
     if q:
         escaped = _escape_like(q)
         stmt = stmt.where(
