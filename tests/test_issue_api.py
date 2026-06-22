@@ -3,6 +3,7 @@ from datetime import datetime
 from types import SimpleNamespace
 
 os.environ.setdefault("DATABASE_URL", "postgresql://user:pass@localhost:5432/test")
+os.environ.setdefault("SECRET_KEY", "test-secret")
 
 from app.api.routers.issues import build_issue_detail, build_issue_list_item
 
