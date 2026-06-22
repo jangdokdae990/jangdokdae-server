@@ -34,6 +34,13 @@ class Settings(BaseSettings):
     fetch_budget_seconds: int = 300
     dedup_similarity_threshold: float = 0.95  # bake-off 검증: same-이슈 7.3%·diff 오탐 0.01%
     top_issue_count: int = 10
+    # 클러스터 중요도 가중치 W(설계 05 §6.1) — 휴리스틱 초기값. bake-off(2026-06-22 §8.2)에서
+    # 운영데이터 교정 전까지 유지로 결정. 합=1.0. Sentiment·Entity는 분석(06)이 값을 채우기 전엔
+    # 0이라 Volume·Velocity가 지배. config로 분리해 무배포 교정 가능.
+    score_weight_volume: float = 0.4
+    score_weight_velocity: float = 0.3
+    score_weight_sentiment: float = 0.15
+    score_weight_entity: float = 0.15
     pipeline_window_hours: int = 24
     google_application_credentials: str = ""
     google_cloud_project: str = ""  # (.env: GOOGLE_CLOUD_PROJECT)
@@ -48,6 +55,13 @@ class Settings(BaseSettings):
     classification_confidence_threshold: float = 0.5  # 미만이면 needs_review(검수 큐)
     llm_request_delay_seconds: float = 0.5  # 이슈 간 호출 간격(rate limit 완화)
     llm_max_retries: int = 6  # langchain(Vertex) 429 지수 백오프 재시도 횟수
+
+    # --- SPOF 전환 메트릭 계기판 (설계 00 §11.5) ---
+    # 단일 호스트 docker-compose(LocalExecutor)의 한계 임계 — 결함이 아니라 측정값이 닿으면
+    # Celery/K8s·Composer로 승격할 "전환 시점"을 알려주는 계기판. 초기 추정값(운영 데이터로 교정).
+    spof_daily_volume_threshold: int = 5000       # 일 수집량 ≥ → 백필·대량 재처리 부담
+    spof_batch_duration_ratio: float = 0.5        # 세션 배치 소요÷세션 간격 ≥ → 스케일아웃 압박
+    spof_monthly_manual_interventions: int = 2    # 월 수동 개입 ≥ → 무중단 운영 한계
 
     # --- 인증/세션 (httpOnly 쿠키 + stateless JWT) ---
     secret_key: str  # JWT 서명 키 — .env 필수, 코드 기본값 금지(시크릿)

@@ -40,8 +40,13 @@ async def main() -> None:
         if not codes:
             raise RuntimeError("KOSPI200 구성종목 조회 실패 — .env의 KRX_ID/KRX_PW 확인")
 
-        # 추적 유니버스를 KOSPI200으로 재설정(기존 활성 해제 후 재승격 → 지수 편출입 반영)
-        await db.execute(update(CompanyEntity).values(is_active=False))
+        # 국내 추적 유니버스를 KOSPI200으로 재설정(기존 활성 해제 후 재승격 → 지수 편출입 반영).
+        # corp_code 보유(국내)만 해제 — 해외 종목(corp_code=NULL)은 별도 관리라 보존한다.
+        await db.execute(
+            update(CompanyEntity)
+            .where(CompanyEntity.corp_code.isnot(None))
+            .values(is_active=False)
+        )
         promoted = await db.execute(
             update(CompanyEntity).where(CompanyEntity.stock_code.in_(codes)).values(is_active=True)
         )
