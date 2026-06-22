@@ -2,10 +2,13 @@ import os
 from datetime import datetime
 from types import SimpleNamespace
 
+from sqlalchemy.dialects import postgresql
+
 os.environ.setdefault("DATABASE_URL", "postgresql://user:pass@localhost:5432/test")
 os.environ.setdefault("SECRET_KEY", "test-secret")
 
-from app.api.routers.issues import build_issue_detail, build_issue_list_item
+from app.api.routers.issues import _array_overlaps, build_issue_detail, build_issue_list_item
+from app.db.orm_models.news_analysis import NewsAnalysis
 
 
 def test_build_issue_list_item_uses_docent_cluster_and_analysis():
@@ -64,3 +67,14 @@ def test_build_issue_detail_maps_content_heads_terms_and_sources():
     assert detail.terms[0].name == "기준금리"
     assert detail.terms[0].definition == "준비 중인 용어입니다."
     assert detail.sources[0].news_source == "Reuters"
+
+
+def test_issue_array_filter_uses_postgres_overlap():
+    sql = str(
+        _array_overlaps(NewsAnalysis.sector_ids, [7]).compile(
+            dialect=postgresql.dialect(),
+            compile_kwargs={"literal_binds": True},
+        )
+    )
+
+    assert "&&" in sql

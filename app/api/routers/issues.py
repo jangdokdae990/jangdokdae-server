@@ -1,7 +1,8 @@
-from typing import Any
+from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import func, select
+from sqlalchemy import Integer, false, func, select, type_coerce
+from sqlalchemy.dialects.postgresql import ARRAY as PG_ARRAY
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.models import (
@@ -13,6 +14,7 @@ from app.api.models import (
     SourceArticleResponse,
 )
 from app.db.base import get_db
+from app.db.orm_models.company_entity import CompanyEntity
 from app.db.orm_models.issue_docent import IssueDocent
 from app.db.orm_models.news_analysis import NewsAnalysis
 from app.db.orm_models.news_cluster import NewsCluster
@@ -29,6 +31,16 @@ FRAME_CATEGORY = {
     "PLAN": "산업·정책",
     "OPINION": "전문가 의견",
 }
+
+DOMESTIC_MARKET_EXCHANGES = {
+    "KOSPI": ("KOSPI",),
+    "KOSDAQ": ("KOSDAQ",),
+}
+OVERSEAS_MARKETS = {"NASDAQ", "SP500", "US_ETF", "GLOBAL"}
+
+
+def _array_overlaps(column: Any, values: list[int]):
+    return type_coerce(column, PG_ARRAY(Integer)).overlap(values)
 
 
 def _category(analysis: Any | None) -> str:
@@ -117,23 +129,61 @@ async def list_issues(
     limit: int = Query(20, ge=1, le=50),
     offset: int = Query(0, ge=0),
     q: str | None = None,
+    sort: Literal["importance", "latest"] = "importance",
+    market: str | None = None,
+    sector_id: int | None = None,
+    company_id: int | None = None,
     db: AsyncSession = Depends(get_db),
 ) -> IssueListResponse:
     filters = []
     if q:
         filters.append(IssueDocent.title.ilike(f"%{q}%"))
+    if sector_id is not None:
+        filters.append(_array_overlaps(NewsAnalysis.sector_ids, [sector_id]))
+    if company_id is not None:
+        filters.append(_array_overlaps(NewsAnalysis.company_ids, [company_id]))
+    if market:
+        market_code = market.upper()
+        if market_code in DOMESTIC_MARKET_EXCHANGES:
+            company_ids = (
+                await db.execute(
+                    select(CompanyEntity.id).where(
+                        CompanyEntity.market.in_(DOMESTIC_MARKET_EXCHANGES[market_code])
+                    )
+                )
+            ).scalars().all()
+            filters.append(
+                _array_overlaps(NewsAnalysis.company_ids, list(company_ids))
+                if company_ids
+                else false()
+            )
+        elif market_code in OVERSEAS_MARKETS:
+            filters.append(NewsAnalysis.origin == "해외")
+        else:
+            filters.append(false())
+
+    order_by = (
+        (IssueDocent.created_at.desc(),)
+        if sort == "latest"
+        else (NewsCluster.importance.desc(), IssueDocent.created_at.desc())
+    )
 
     stmt = (
         select(IssueDocent, NewsCluster, NewsAnalysis)
         .join(NewsCluster, IssueDocent.cluster_id == NewsCluster.id)
         .outerjoin(NewsAnalysis, IssueDocent.cluster_id == NewsAnalysis.cluster_id)
         .where(*filters)
-        .order_by(NewsCluster.importance.desc(), IssueDocent.created_at.desc())
+        .order_by(*order_by)
         .limit(limit)
         .offset(offset)
     )
     rows = (await db.execute(stmt)).all()
-    total = await db.scalar(select(func.count()).select_from(IssueDocent).where(*filters))
+    total = await db.scalar(
+        select(func.count(IssueDocent.id))
+        .join(NewsCluster, IssueDocent.cluster_id == NewsCluster.id)
+        .outerjoin(NewsAnalysis, IssueDocent.cluster_id == NewsAnalysis.cluster_id)
+        .where(*filters)
+    )
     items = [build_issue_list_item(docent, cluster, analysis) for docent, cluster, analysis in rows]
     return IssueListResponse(
         items=items,
