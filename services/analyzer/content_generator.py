@@ -61,6 +61,16 @@ def _dedup_term_spans(spans: list[TermSpan]) -> list[TermSpan]:
     return deduped
 
 
+def _filter_term_spans_in_body(spans: list[TermSpan], answers: list[str]) -> list[TermSpan]:
+    """content_heads 본문(answers)에 실제 등장하는 term만 남긴다.
+
+    LLM이 term_tags엔 있으나 본문엔 쓰지 않은 용어까지 term_spans로 내보내는 경우가 있어,
+    본문에 없는 term을 걸러 프런트가 본문에 없는 용어를 하이라이트하는 일을 막는다.
+    """
+    body = " ".join(answers)
+    return [s for s in spans if s.term and s.term in body]
+
+
 def opinion_guard_ok(classification: ClassificationResult, content: ContentResult) -> bool:
     """OPINION 1단 종목 가드 — head1 답변에 primary 종목명이 박혔는지(08 §3-⑥).
 
@@ -166,12 +176,20 @@ class ContentGenerator:
                     "cluster=%s head%d 금지 표현 검출: %s", issue.cluster_id, i, hits
                 )
 
+        # term_spans는 본문에 실제 등장하는 용어만 남긴다(본문에 없는 용어 하이라이트 방지) → 중복 제거.
+        in_body = _filter_term_spans_in_body(draft.term_spans, draft.answers)
+        dropped = [s.term for s in draft.term_spans if s not in in_body]
+        if dropped:
+            logger.warning(
+                "cluster=%s 본문 미등장 term_spans 제거: %s", issue.cluster_id, dropped
+            )
+
         return ContentResult(
             title=draft.title,
             heads=_assemble_heads(specs, draft.answers),
             hook_lines=draft.hook_lines,
             evidence_spans=draft.evidence_spans,
-            term_spans=_dedup_term_spans(draft.term_spans),  # 같은 용어 반복 제거
+            term_spans=_dedup_term_spans(in_body),  # 본문 정합 후 같은 용어 반복 제거
             connection_module=draft.connection_module,
         )
 

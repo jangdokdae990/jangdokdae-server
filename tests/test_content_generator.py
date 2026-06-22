@@ -137,7 +137,7 @@ def test_generate_no_enrichment_leaves_block_empty():
 def test_term_spans_deduplicated():
     draft = ContentDraft(
         title="t",
-        answers=["a1", "a2", "a3", "a4"],
+        answers=["MLCC 수요가 늘었다", "실적이 컨센서스를 웃돌았다", "a3", "a4"],
         hook_lines=HookLines(pain="p", neutral="n"),
         term_spans=[
             TermSpan(term="MLCC", sentence="s1"),
@@ -149,6 +149,23 @@ def test_term_spans_deduplicated():
         _issue(), _classification("OPINION")
     )
     assert [t.term for t in result.term_spans] == ["MLCC", "컨센서스"]
+
+
+def test_term_spans_filtered_to_body():
+    # 본문(content_heads)에 등장하지 않는 용어의 term_span은 제거한다.
+    draft = ContentDraft(
+        title="t",
+        answers=["MLCC 수요가 늘었다", "a2", "a3", "a4"],
+        hook_lines=HookLines(pain="p", neutral="n"),
+        term_spans=[
+            TermSpan(term="MLCC", sentence="s1"),            # 본문에 있음 → 유지
+            TermSpan(term="적층세라믹콘덴서", sentence="s2"),  # 본문에 없음 → 제거
+        ],
+    )
+    result = ContentGenerator(generator=_FakeChain(draft)).generate(
+        _issue(), _classification("OPINION")
+    )
+    assert [t.term for t in result.term_spans] == ["MLCC"]
 
 
 def _opinion_classification() -> ClassificationResult:
