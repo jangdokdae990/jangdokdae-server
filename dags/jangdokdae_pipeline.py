@@ -1,8 +1,8 @@
 """세션 배치 DAG — 매일(주말 포함) 00:00·09:00·12:00·15:30 KST 수집·임베딩.
 
-흐름: [collect_news, collect_company] >> embed. embed는 EMBED_ASSET을 produce하고, 클러스터링은
-별도 이벤트 기반 DAG(jangdokdae_clustering)가 그 Asset을 consume해 수행한다(수집 시점 임베딩 /
-이벤트 기반 재클러스터링 분리). 각 Task가 단계를 직접 호출하고, 데이터는 공유 DB(Neon)로만 핸드오프.
+흐름: [collect_news, collect_company] >> embed. embed는 EMBED_ASSET을 produce하고, 클러스터링·분석은
+별도 이벤트 기반 DAG(jangdokdae_clustering: cluster >> analyze)가 그 Asset을 consume해 수행한다
+(수집 시점 임베딩 / 이벤트 기반 재클러스터링·분석 분리). 데이터는 공유 DB(Neon)로만 핸드오프.
 
 Airflow 코어(SQLAlchemy 1.4)와 앱(SQLAlchemy 2.0)이 충돌하므로 단계 실행은
 ExternalPythonOperator로 앱 전용 venv에서 돌린다. callable은 venv에서 직렬화 실행되므로
