@@ -17,20 +17,28 @@ class Settings(BaseSettings):
     ecos_api_key: str = ""
     krx_id: str = ""
     krx_pw: str = ""
+    # 임베딩 모델 — bake-off(2026-06-22) 선정: ko-sroberta(768)+title_body+HDBSCAN.
+    # 결과: docs/evaluation/02~08. .env로 override 가능하나 기본값이 운영 정본.
     embed_model: str = "jhgan/ko-sroberta-multitask"
     embed_dim: int = 768
     embed_batch_size: int = 50
-    chunk_size: int = 1000
+    chunk_size: int = 1000        # bake-off 최적(작은 청크는 본문 후반 희석으로 F1 하락)
     chunk_overlap: int = 200
+    # 제목+본문 가중평균 결합 가중치 — α·제목 + (1-α)·본문(각 L2 정규화 후). bake-off 고정 0.3.
+    embed_title_weight: float = 0.3
     cluster_min_cluster_size: int = 2
     cluster_min_samples: int = 1
-    dedup_similarity_threshold: float = 0.95
+    cluster_window_days: int = 14  # 이벤트 기반 재클러스터링 윈도우(최근 N일 전체 재계산)
+    # 본문 fetch 운영 가드(설계 02 §8.4.1) — 임베딩 단계 본문 fetch의 전체 예산(초). 초과분은
+    # title-only로 강제 전환해 파이프라인이 느린 매체에 묶이지 않게 한다.
+    fetch_budget_seconds: int = 300
+    dedup_similarity_threshold: float = 0.95  # bake-off 검증: same-이슈 7.3%·diff 오탐 0.01%
     top_issue_count: int = 10
     pipeline_window_hours: int = 24
     google_application_credentials: str = ""
     google_cloud_project: str = ""
     google_cloud_location: str = "asia-northeast3"
-    vertex_model: str = "gemini-3.5-flash"
+    vertex_model: str = "gemini-2.5-flash"  # 2026-06-22 정정: 3.5-flash는 리전 미존재(404)
 
     # --- 인증/세션 (httpOnly 쿠키 + stateless JWT) ---
     secret_key: str  # JWT 서명 키 — .env 필수, 코드 기본값 금지(시크릿)
@@ -56,9 +64,6 @@ class Settings(BaseSettings):
     oauth_google_client_id: str = ""
     oauth_google_client_secret: str = ""
     oauth_google_redirect_uri: str = ""
-    oauth_naver_client_id: str = ""
-    oauth_naver_client_secret: str = ""
-    oauth_naver_redirect_uri: str = ""
 
     @property
     def cors_origin_list(self) -> list[str]:
