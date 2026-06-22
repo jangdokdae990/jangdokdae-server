@@ -21,6 +21,10 @@ class NewsCluster(Base):
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    # 안정 cluster id — 윈도우 재클러스터링 간 멤버 겹침으로 승계되는 cross-run 식별자
+    # (설계 05 §5.1a). per-run 행 그레인은 유지하고, 같은 이슈가 여러 run에 걸쳐 같은 stable_id를
+    # 갖게 한다. 첫 적재분·과거 행은 NULL 가능(추적은 직전 run부터 시작).
+    stable_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
     run_date: Mapped[date] = mapped_column(Date, nullable=False)  # 클러스터링 실행 일자
     # 대표 기사 = member_news_ids[0] (클러스터 중심 근접순)
     representative_news_id: Mapped[int] = mapped_column(

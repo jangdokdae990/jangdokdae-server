@@ -128,5 +128,5 @@ async def upsert_news_clusters(db: AsyncSession, records: list[dict]) -> int:
         NewsCluster,
         records,
         ["run_date", "representative_news_id"],
-        update_columns=["member_news_ids", "size", "importance"],
+        update_columns=["member_news_ids", "size", "importance", "stable_id"],
     )

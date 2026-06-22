@@ -24,6 +24,7 @@ W = {"volume": 0.4, "velocity": 0.3, "sentiment": 0.15, "entity": 0.15}
 class ClusterScore:
     member_news_ids: list[int]  # 클러스터 소속 기사 id (중심 근접순 정렬)
     importance: float           # 복합 중요도 [0,1]
+    stable_id: int | None = None  # 윈도우 재클러스터링 간 승계되는 안정 cluster id (설계 05 §5.1a)
 
     @property
     def representative_news_id(self) -> int:
@@ -76,6 +77,7 @@ async def persist_clusters(
         [
             {
                 "run_date": run_date,
+                "stable_id": cluster.stable_id,
                 "representative_news_id": cluster.representative_news_id,
                 "member_news_ids": cluster.member_news_ids,
                 "size": len(cluster.member_news_ids),
