@@ -20,7 +20,7 @@ class User(Base):
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    provider: Mapped[str] = mapped_column(String(20), nullable=False)  # "kakao"|"google"|"naver"
+    provider: Mapped[str] = mapped_column(String(20), nullable=False)  # "kakao"|"google"
     provider_user_id: Mapped[str] = mapped_column(String(100), nullable=False)  # provider 고유 id
     email: Mapped[str | None] = mapped_column(String(255), nullable=True)
     nickname: Mapped[str | None] = mapped_column(String(100), nullable=True)

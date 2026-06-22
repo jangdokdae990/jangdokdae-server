@@ -1,6 +1,6 @@
 # 장독대 API 명세
 
-> **작성자** Kim minkyoung · **작성일** 2026-06-21 · **범위** 인증(OAuth 카카오·구글·네이버)·온보딩·마스터 조회 API 계약
+> **작성자** Kim minkyoung · **작성일** 2026-06-21 · **범위** 인증(OAuth 카카오·구글)·온보딩·마스터 조회 API 계약
 
 ## 목차
 
@@ -27,7 +27,7 @@
 
 ## 2. 인증 — OAuth 로그인
 
-`{provider}`는 `kakao` | `google` | `naver`. redirect URI는 provider 콘솔에 `{backend}/api/v1/auth/{provider}/callback`로 등록한다(네이버는 `state` 필수).
+`{provider}`는 `kakao` | `google`. redirect URI는 provider 콘솔에 `{backend}/api/v1/auth/{provider}/callback`로 등록한다.
 
 | 메서드 | 경로 | 설명 | 인증 |
 |--------|------|------|------|

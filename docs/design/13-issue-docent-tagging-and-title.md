@@ -76,16 +76,9 @@ classify (origin·sector_tags·company_tags)
 - `ContentGenerator.generate()`가 `ContentResult(title=draft.title, ...)`로 전달.
 - `_persist`는 `title = content.title or issue.main_article.title` — LLM이 빈 제목을 주면 원문 제목으로 **폴백**해 `NOT NULL` 컬럼을 안전하게 채운다.
 
-## 6. 마이그레이션 head 병합
+## 6. 마이그레이션
 
-작업 시작 시 alembic head가 **둘로 갈라져** 있었다. PR #13(content-pipeline)·#14(collector·auth)가 공통 부모 `fa6e579bc7dc`에서 각각 마이그레이션을 더한 채 main에 병합됐기 때문이다.
-
-```
-fa6e579bc7dc ─┬─ … ─ e8f1a2b3c4d5  (content pipeline: news_analysis·issue_docent)
-              └─ … ─ 211e9d09101d  (collector·auth: user·market·interest 테이블)
-```
-
-이 상태에서는 `alembic upgrade head`가 "multiple heads" 에러를 낸다. 신규 리비전이 `down_revision`을 **두 head의 튜플**로 두어 컬럼 추가와 동시에 두 갈래를 병합한다. 결과적으로 단일 head(`f3a7c9d2e1b8`)로 수렴하며, 기존 multiple-heads 문제도 함께 해소된다.
+신규 리비전 `f3a7c9d2e1b8`는 main의 단일 head(`e89f78e7e898`) 위에 issue_docent 컬럼·인덱스만 추가한다(수기 작성). 분기됐던 alembic head는 main 측 `e89f78e7e898`(collector·content-pipeline 병합)에서 이미 단일화돼 있어, 본 리비전은 그 위에 선형으로 얹힌다.
 
 > 이 프로젝트의 마이그레이션은 수기 작성(.env/DB 없이 autogenerate 불가)이므로, `news_analysis` 백필 마이그레이션과 동일한 형식으로 손으로 작성했다.
 
@@ -112,7 +105,7 @@ fa6e579bc7dc ─┬─ … ─ e8f1a2b3c4d5  (content pipeline: news_analysis·i
 
 - 피드 조회 쿼리·API에서 `user_interest_*`와 `issue_docent.{market,sector,company}_ids`를 `&&`(배열 겹침)으로 매칭하는 엔드포인트 구현.
 - 해외 종목 데이터가 들어오기 전까지 해외 이슈는 `GLOBAL` 하나로만 태깅된다 — NASDAQ·SP500·US_ETF로 세분 태깅하려면 해외 종목 유니버스 또는 분류 단계의 시장 식별 출력이 필요하다.
-- **온보딩 정합성** → [14](./14-market-taxonomy-fix.md)에서 해결: market 택소노미를 DB 정본(6-market)으로 맞추고 `search_companies`를 거래소 직접 비교로 수정, `MARKET_CODE_TO_EXCHANGES` 제거.
+- **온보딩 정합성**: market 택소노미(6-종 reseed)·`search_companies`의 `MARKET_CODE_TO_EXCHANGES`(KOSPI/KOSDAQ) 정합은 main에서 이미 처리됨 — `resolve_market_ids`는 그 위에서 `CompanyEntity.market == Market.code` 조인으로 동작.
 - LLM 제목 품질 평가(원문 복사율·금지 표현·길이) 지표화.
 
 ## 10. 참고 자료
