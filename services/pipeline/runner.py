@@ -3,7 +3,8 @@
 운영 오케스트레이션은 Airflow DAG가 전담하고, 이 러너는 로컬·테스트 편의만 맡는 얇은 함수다.
 단계 간 데이터는 공유 DB 상태 핸드오프라 러너든 DAG든 동작은 동일하다.
 
-흐름: (NewsCollector ∥ CompanyCollector) → EmbeddingClusterer → [분석 — 미구현 TODO].
+흐름: (NewsCollector ∥ CompanyCollector) → EmbeddingClusterer → NewsAnalyzer(분류·콘텐츠, →10).
+전처리는 별도 단계가 아니라 NewsCollector 안의 인메모리 모듈이다(설계 04 §1.2).
 
 사용:
     python -m services.pipeline.runner            # schedule="morning"
@@ -17,6 +18,7 @@ import sys
 from app.db.base import AsyncSessionLocal
 from services.pipeline.company_collector import CompanyCollector
 from services.pipeline.embedding_clusterer import EmbeddingClusterer, EmbeddingClustererState
+from services.pipeline.news_analyzer import NewsAnalyzer, NewsAnalyzerState
 from services.pipeline.news_collector import NewsCollector, NewsCollectorState
 
 logger = logging.getLogger(__name__)
@@ -44,12 +46,20 @@ async def run_pipeline(schedule: str = DEFAULT_SCHEDULE) -> dict[str, object]:
     async with AsyncSessionLocal() as db:
         embed_state: EmbeddingClustererState = await EmbeddingClusterer().run(db)
 
-    # TODO: NewsAnalysisAgent 구현 시 연결 — embed_state.top_issues 인계
+    # 분석(분류·콘텐츠 생성, →10) — embed_state가 적재한 news_cluster를 DB로 이어받는다.
+    async with AsyncSessionLocal() as db:
+        analyze_state: NewsAnalyzerState = await NewsAnalyzer().run(db)
+
     logger.info(
-        "run_pipeline 완료 schedule=%s news=%s company=%s embed=%s",
-        schedule, news_state, company_state, embed_state,
+        "run_pipeline 완료 schedule=%s news=%s company=%s embed=%s analyze=%s",
+        schedule, news_state, company_state, embed_state, analyze_state,
     )
-    return {"news": news_state, "company": company_state, "embedding": embed_state}
+    return {
+        "news": news_state,
+        "company": company_state,
+        "embedding": embed_state,
+        "analyze": analyze_state,
+    }
 
 
 if __name__ == "__main__":

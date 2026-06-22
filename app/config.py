@@ -28,9 +28,17 @@ class Settings(BaseSettings):
     top_issue_count: int = 10
     pipeline_window_hours: int = 24
     google_application_credentials: str = ""
-    google_cloud_project: str = ""
-    google_cloud_location: str = "asia-northeast3"
-    vertex_model: str = "gemini-3.5-flash"
+    google_cloud_project: str = ""  # (.env: GOOGLE_CLOUD_PROJECT)
+    google_cloud_location: str = "asia-northeast3"  # (.env: GOOGLE_CLOUD_LOCATION)
+    vertex_model: str = "gemini-3.5-flash"  # LLM 분석용 (.env: VERTEX_MODEL)
+    # 뉴스 분석·콘텐츠 생성 단계 (설계 10) — 분류·생성 LLM 호출 파라미터.
+    # 분석할 상위 클러스터 수 (.env: ANALYSIS_TOP_CLUSTER_COUNT)
+    analysis_top_cluster_count: int = 10
+    classify_temperature: float = 0.0  # 호출 A(분류) — 결정적
+    generate_temperature: float = 0.3  # 호출 B(생성) — 약간의 다양성
+    classification_confidence_threshold: float = 0.5  # 미만이면 needs_review(검수 큐)
+    llm_request_delay_seconds: float = 0.5  # 이슈 간 호출 간격(rate limit 완화)
+    llm_max_retries: int = 6  # langchain(Vertex) 429 지수 백오프 재시도 횟수
 
     # --- 인증/세션 (httpOnly 쿠키 + stateless JWT) ---
     secret_key: str  # JWT 서명 키 — .env 필수, 코드 기본값 금지(시크릿)

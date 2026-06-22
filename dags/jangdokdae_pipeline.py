@@ -1,7 +1,7 @@
 """메인 파이프라인 DAG — 매일(주말 포함) 00:00·09:00·12:00·15:30 KST, 1 run = 전체 완주.
 
-흐름: [collect_news, collect_company] >> embed_cluster (분석은 미구현 TODO).
-각 Task가 단계를 직접 호출하고, 단계 간 데이터는 공유 DB(Neon) 상태로만 핸드오프한다.
+흐름: [collect_news, collect_company] >> embed_cluster >> analyze (분류·콘텐츠 생성, →10).
+각 Task가 단계를 직접 호출하고, 단계 간 데이터는 공유 DB(Neon) 상태로만 핸드오프한다(§6).
 
 Airflow 코어(SQLAlchemy 1.4)와 앱(SQLAlchemy 2.0)이 충돌하므로 단계 실행은
 ExternalPythonOperator로 앱 전용 venv에서 돌린다. callable은 venv에서 직렬화 실행되므로
@@ -79,6 +79,21 @@ def _embed_cluster() -> None:
     asyncio.run(_run())
 
 
+def _analyze() -> None:
+    import asyncio
+    import sys
+
+    sys.path.insert(0, "/opt/jangdokdae")
+    from app.db.base import AsyncSessionLocal
+    from services.pipeline.news_analyzer import NewsAnalyzer
+
+    async def _run() -> None:
+        async with AsyncSessionLocal() as db:
+            await NewsAnalyzer().run(db)
+
+    asyncio.run(_run())
+
+
 with DAG(
     dag_id="jangdokdae_pipeline",
     # 매일(주말 포함) 00:00·09:00·12:00·15:30 KST 4구간 경계 트리거 (MARKET_SCHEDULE 주석 참고).
@@ -106,5 +121,11 @@ with DAG(
         python_callable=_embed_cluster,
         expect_airflow=False,
     )
-    # TODO: analyze Task — NewsAnalysisAgent 구현 후 embed_cluster >> analyze 연결
-    [collect_news, collect_company] >> embed_cluster
+    # 분석(분류·콘텐츠 생성, →10) — LangGraph 단일 에이전트를 앱 venv에서 호출.
+    analyze = ExternalPythonOperator(
+        task_id="analyze",
+        python=APP_PYTHON,
+        python_callable=_analyze,
+        expect_airflow=False,
+    )
+    [collect_news, collect_company] >> embed_cluster >> analyze

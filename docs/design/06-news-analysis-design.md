@@ -1,5 +1,10 @@
 # 뉴스 분석 기획서
 
+> ⚠️ **대체됨 (2026-06-16)** — 이 문서의 분류 체계(L1 5유형 × L2 6프레임 × L3 태그)는
+> [08-pain-to-content-pipeline.md](./08-pain-to-content-pipeline.md)의 **scope(3) × frame(7)** 체계로 대체되었다.
+> 실제 구현은 [10-content-pipeline-implementation.md](./10-content-pipeline-implementation.md)를 따른다.
+> 본 문서의 §10~16(4-head 콘텐츠 구조·톤 규칙·퀴즈)·§17~18(데이터 명세·LangGraph 에이전트) 설계 의도는 그대로 유효하며 10번이 이를 계승한다.
+
 > **작성자** Kim minkyoung · **작성일** 2026-05-28 (2026-06-12 핵심 압축 개정)
 >
 > **범위** 클러스터링 완료 → 뉴스 분류 → 콘텐츠 생성 → Issue Docent
