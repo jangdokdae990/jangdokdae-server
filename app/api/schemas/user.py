@@ -1,5 +1,7 @@
 """마이페이지(사용자 프로필) 응답 스키마."""
 
+from datetime import datetime
+
 from pydantic import BaseModel
 
 from app.api.schemas.auth import InterestSummary
@@ -18,3 +20,27 @@ class UserProfileResponse(BaseModel):
     profile_image_url: str | None
     onboarding_completed: bool
     interests: InterestSummary
+
+
+class UserActivityItemResponse(BaseModel):
+    issue_id: int
+    title: str
+    read_at: datetime | None
+    bookmarked_at: datetime | None
+    quiz_correct_count: int | None
+    quiz_total_count: int | None
+    quiz_completed_at: datetime | None
+
+
+class UserLearningStatsResponse(BaseModel):
+    read_issue_count: int
+    saved_issue_count: int
+    completed_quiz_count: int
+    correct_quiz_count: int
+
+
+class UserActivityResponse(BaseModel):
+    stats: UserLearningStatsResponse
+    recent_issues: list[UserActivityItemResponse]
+    saved_issues: list[UserActivityItemResponse]
+    quiz_records: list[UserActivityItemResponse]
