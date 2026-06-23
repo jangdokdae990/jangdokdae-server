@@ -21,6 +21,9 @@ class CompanyEntity(Base):
     )
     corp_code: Mapped[str | None] = mapped_column(String(20), nullable=True)  # DART 고유코드
     market: Mapped[str] = mapped_column(String(10), nullable=False)  # "KOSPI" | "KOSDAQ"
+    markets: Mapped[list[str]] = mapped_column(
+        ARRAY(String(10)), nullable=False, server_default=text("'{}'::text[]")
+    )
     sector_id: Mapped[int | None] = mapped_column(
         Integer, ForeignKey("sectors.id"), nullable=True, index=True
     )

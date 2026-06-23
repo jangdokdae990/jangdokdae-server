@@ -2,7 +2,7 @@
 
 from datetime import datetime
 
-from sqlalchemy import DateTime, ForeignKey, Integer, String, Text, UniqueConstraint
+from sqlalchemy import DateTime, ForeignKey, Index, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import KST_NOW, Base
@@ -10,7 +10,11 @@ from app.db.base import KST_NOW, Base
 
 class DictionaryTerm(Base):
     __tablename__ = "dictionary_terms"
-    __table_args__ = (UniqueConstraint("term", name="uq_dictionary_terms_term"),)
+    __table_args__ = (
+        UniqueConstraint("term", name="uq_dictionary_terms_term"),
+        Index("ix_dictionary_terms_status", "status"),
+        Index("ix_dictionary_terms_type", "term_type"),
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     term: Mapped[str] = mapped_column(String(100), nullable=False)
