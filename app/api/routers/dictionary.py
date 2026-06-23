@@ -1,7 +1,7 @@
 from secrets import compare_digest
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Query
-from sqlalchemy import select
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, Response
+from sqlalchemy import func, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -44,6 +44,7 @@ def extract_terms(term_spans: list[dict]) -> list[str]:
 
 @router.get("", response_model=list[DictionaryTermResponse])
 async def list_dictionary_terms(
+    response: Response,
     q: str | None = Query(default=None),
     type: str | None = Query(default=None),
     status: str | None = Query(default=None),
@@ -58,6 +59,8 @@ async def list_dictionary_terms(
         filters.append(DictionaryTerm.term_type == type)
     if status:
         filters.append(DictionaryTerm.status == status)
+    total = await db.scalar(select(func.count(DictionaryTerm.id)).where(*filters))
+    response.headers["X-Total-Count"] = str(total or 0)
     rows = (
         await db.execute(
             select(DictionaryTerm)

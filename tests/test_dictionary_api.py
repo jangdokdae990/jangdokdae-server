@@ -2,7 +2,7 @@ import os
 from types import SimpleNamespace
 
 import pytest
-from fastapi import HTTPException
+from fastapi import HTTPException, Response
 
 os.environ.setdefault("DATABASE_URL", "postgresql://user:pass@localhost:5432/test")
 os.environ.setdefault("SECRET_KEY", "test-secret")
@@ -11,6 +11,7 @@ from app.api.models import DictionaryStatusUpdateRequest
 from app.api.routers.dictionary import (
     create_candidates_from_issue,
     extract_terms,
+    list_dictionary_terms,
     update_dictionary_term_status,
 )
 from services.analyzer.dictionary_generator import DictionaryDraft, generate_dictionary_draft
@@ -25,6 +26,22 @@ def test_extract_terms_deduplicates_term_values_only():
             {"term": " "},
         ]
     ) == ["기준금리", "PER"]
+
+
+@pytest.mark.asyncio
+async def test_list_dictionary_terms_sets_total_count_header():
+    response = Response()
+
+    result = await list_dictionary_terms(
+        response,
+        status="approved",
+        limit=6,
+        offset=6,
+        db=_FakeListDB(),
+    )
+
+    assert response.headers["X-Total-Count"] == "42"
+    assert [item.term for item in result] == ["기준금리"]
 
 
 @pytest.mark.asyncio
@@ -166,6 +183,24 @@ class _ExistingResult:
 
     def all(self):
         return self.terms
+
+
+class _FakeListDB:
+    async def scalar(self, _stmt):
+        return 42
+
+    async def execute(self, _stmt):
+        return _ExistingResult([
+            SimpleNamespace(
+                id=1,
+                term="기준금리",
+                term_type="finance",
+                definition="금리의 기준입니다.",
+                example=None,
+                source="llm",
+                status="approved",
+            )
+        ])
 
 
 class _InsertResult:
