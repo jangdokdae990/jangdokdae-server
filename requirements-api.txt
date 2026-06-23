@@ -1,7 +1,9 @@
 # API 전용 슬림 의존성 (Render 배포용).
 # 데이터 수집/임베딩/파이프라인용 무거운 의존성(torch, sentence-transformers,
-# hdbscan, scikit-learn, pykrx, finance-datareader, trafilatura, feedparser,
-# langchain*, langgraph)은 API 라우터가 import하지 않으므로 제외한다.
+# hdbscan, scikit-learn, pykrx, finance-datareader, trafilatura, feedparser)은
+# API 라우터가 import하지 않으므로 제외한다.
+# 단, dictionary 라우터가 services.analyzer.dictionary_generator를 통해
+# langchain-google-vertexai·langgraph를 모듈 로드 시 import하므로 이 둘은 포함한다.
 # 전체 의존성은 pyproject.toml 참고. 버전은 pyproject.toml과 일치시킬 것.
 fastapi==0.136.3
 uvicorn[standard]==0.49.0
@@ -15,3 +17,5 @@ httpx==0.28.1
 pgvector==0.4.2
 python-dateutil==2.9.0.post0
 greenlet==3.5.1
+langchain-google-vertexai==3.2.3
+langgraph==1.2.4
