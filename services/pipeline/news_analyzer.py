@@ -35,6 +35,7 @@ from services.analyzer.schemas import (
     ClassificationResult,
     ContentResult,
     Issue,
+    QuizOutput,
 )
 from utils.dates import now_kst
 
@@ -91,6 +92,7 @@ class NewsAnalyzer:
         issue: Issue,
         classification: ClassificationResult,
         content: ContentResult | None,
+        quizzes: QuizOutput | None,
         review: bool,
     ) -> None:
         # 태그(이름)를 마스터 id로 해소해 백필 — 관계형 조회·주가 연동의 조인 키.
@@ -126,6 +128,7 @@ class NewsAnalyzer:
                 connection_module=[c.model_dump() for c in content.connection_module],
                 evidence_spans=[e.model_dump() for e in content.evidence_spans],
                 term_spans=[t.model_dump() for t in content.term_spans],
+                quizzes=[q.model_dump() for q in quizzes.quizzes] if quizzes else [],
             )
         await mark_news_analyzed(db, cluster.member_news_ids)
 
@@ -145,6 +148,7 @@ class NewsAnalyzer:
         result = await self.graph.ainvoke({"issue": issue, "db": db})
         classification: ClassificationResult = result["classification"]
         content: ContentResult | None = result.get("content")  # 비투자성 skip 시 None
+        quizzes: QuizOutput | None = result.get("quizzes")
         skipped = content is None
         if skipped:
             logger.info(
@@ -152,7 +156,7 @@ class NewsAnalyzer:
             )
         # 검수 큐 진입: 분류 저신뢰 OR OPINION 1단 종목 가드 최종 실패(재생성 후에도 누락).
         review = needs_review(classification) or result.get("generation_review", False)
-        await self._persist(db, cluster, issue, classification, content, review)
+        await self._persist(db, cluster, issue, classification, content, quizzes, review)
         await db.commit()
         return ClusterOutcome(review=review, skipped_irrelevant=skipped)
 

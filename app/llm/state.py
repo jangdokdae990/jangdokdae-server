@@ -11,7 +11,7 @@ from typing import TypedDict
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from services.analyzer.schemas import ClassificationResult, ContentResult, Issue
+from services.analyzer.schemas import ClassificationResult, ContentResult, Issue, QuizOutput
 
 
 class AnalysisState(TypedDict, total=False):
@@ -20,4 +20,5 @@ class AnalysisState(TypedDict, total=False):
     classification: ClassificationResult  # classify 노드 산출
     enrichment: dict  # enrich 노드 산출(OPINION 현재가 등, 없으면 {})
     content: ContentResult  # generate 노드 산출
+    quizzes: QuizOutput  # quiz 노드 산출
     generation_review: bool  # generate 노드 산출 — OPINION 1단 가드 최종 실패 시 True

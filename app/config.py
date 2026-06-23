@@ -47,6 +47,8 @@ class Settings(BaseSettings):
     google_cloud_location: str = "asia-northeast3"  # (.env: GOOGLE_CLOUD_LOCATION)
     # LLM 분석용 (.env: VERTEX_MODEL). 2026-06-22 정정: 3.5-flash는 리전 미존재(404).
     vertex_model: str = "gemini-2.5-flash"
+    dictionary_model: str = "gemini-3-flash-preview"  # (.env: DICTIONARY_MODEL)
+    dictionary_fallback_model: str = "gemini-3.1-flash-lite-preview"
     # 뉴스 분석·콘텐츠 생성 단계 (설계 10) — 분류·생성 LLM 호출 파라미터.
     # 분석할 상위 클러스터 수 (.env: ANALYSIS_TOP_CLUSTER_COUNT)
     analysis_top_cluster_count: int = 10
