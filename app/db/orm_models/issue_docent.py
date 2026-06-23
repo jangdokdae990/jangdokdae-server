@@ -71,6 +71,10 @@ class IssueDocent(Base):
     term_spans: Mapped[list] = mapped_column(
         JSONB, nullable=False, server_default=text("'[]'::jsonb")
     )
+    # quiz_id/kind/question/options/answer_index/explanation × 3
+    quizzes: Mapped[list] = mapped_column(
+        JSONB, nullable=False, server_default=text("'[]'::jsonb")
+    )
     is_published: Mapped[bool] = mapped_column(
         Boolean, server_default=text("false"), default=False, nullable=False
     )

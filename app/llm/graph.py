@@ -19,16 +19,19 @@ from app.llm.state import AnalysisState
 from services.analyzer.classifier import NewsClassifier
 from services.analyzer.content_generator import ContentGenerator
 from services.analyzer.enricher import DataEnricher
+from services.analyzer.quiz_generator import QuizGenerator
 
 
 def build_analysis_graph(
     classifier: NewsClassifier | None = None,
     generator: ContentGenerator | None = None,
+    quiz_generator: QuizGenerator | None = None,
     enricher: DataEnricher | None = None,
 ):
     """classify → enrich → generate 그래프를 컴파일한다. 서비스 객체 주입 가능(테스트용)."""
     clf = classifier or NewsClassifier()
     gen = generator or ContentGenerator()
+    quiz_gen = quiz_generator or QuizGenerator()
     enr = enricher or DataEnricher()
 
     async def classify_node(state: AnalysisState) -> dict:
@@ -51,6 +54,15 @@ def build_analysis_graph(
         )
         return {"content": content, "generation_review": review}
 
+    async def quiz_node(state: AnalysisState) -> dict:
+        quizzes = await asyncio.to_thread(
+            quiz_gen.generate,
+            state["issue"],
+            state["classification"],
+            state["content"],
+        )
+        return {"quizzes": quizzes}
+
     def route_after_classify(state: AnalysisState) -> str:
         """생성(enrich·generate)을 건너뛰고 종료할지 결정 — content가 비는 상태로 끝난다.
 
@@ -68,8 +80,10 @@ def build_analysis_graph(
     graph.add_node("classify", classify_node)
     graph.add_node("enrich", enrich_node)
     graph.add_node("generate", generate_node)
+    graph.add_node("quiz", quiz_node)
     graph.set_entry_point("classify")
     graph.add_conditional_edges("classify", route_after_classify, {"enrich": "enrich", "skip": END})
     graph.add_edge("enrich", "generate")
-    graph.add_edge("generate", END)
+    graph.add_edge("generate", "quiz")
+    graph.add_edge("quiz", END)
     return graph.compile()

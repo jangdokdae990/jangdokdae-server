@@ -129,6 +129,22 @@ class ContentResult(BaseModel):
     connection_module: list[ConnectionItem] = Field(default_factory=list)
 
 
+QuizKind = Literal["term", "issue", "domain"]
+
+
+class QuizQuestion(BaseModel):
+    quiz_id: str = Field(description='고정 id: "quiz-1"~"quiz-3"')
+    kind: QuizKind
+    question: str
+    options: list[str] = Field(min_length=4, max_length=4)
+    answer_index: int = Field(ge=0, le=3)
+    explanation: str
+
+
+class QuizOutput(BaseModel):
+    quizzes: list[QuizQuestion] = Field(min_length=3, max_length=3)
+
+
 # ════════════════════════════════════════════════════════
 # 내부 데이터 구조
 # ════════════════════════════════════════════════════════
