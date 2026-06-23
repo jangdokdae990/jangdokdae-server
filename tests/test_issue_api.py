@@ -7,8 +7,20 @@ from sqlalchemy.dialects import postgresql
 os.environ.setdefault("DATABASE_URL", "postgresql://user:pass@localhost:5432/test")
 os.environ.setdefault("SECRET_KEY", "test-secret")
 
-from app.api.routers.issues import _array_overlaps, build_issue_detail, build_issue_list_item
+import pytest
+
+from app.api.models import QuizSubmitRequest
+from app.api.routers.issues import (
+    _array_overlaps,
+    _quiz_response,
+    build_issue_detail,
+    build_issue_list_item,
+    get_issue_quiz,
+    submit_issue_quiz,
+)
 from app.db.orm_models.news_analysis import NewsAnalysis
+from services.analyzer.quiz_generator import validate_quiz_output
+from services.analyzer.schemas import QuizOutput, QuizQuestion
 
 
 def test_build_issue_list_item_uses_docent_cluster_and_analysis():
@@ -78,3 +90,107 @@ def test_issue_array_filter_uses_postgres_overlap():
     )
 
     assert "&&" in sql
+
+
+def _quizzes():
+    return [
+        {
+            "quiz_id": "quiz-1",
+            "kind": "term",
+            "question": "기준금리는 무엇인가요?",
+            "options": ["정책 금리", "개별 종목", "배당금", "거래량"],
+            "answer_index": 0,
+            "explanation": "기준금리는 중앙은행 정책 금리입니다.",
+        },
+        {
+            "quiz_id": "quiz-2",
+            "kind": "issue",
+            "question": "이번 소식의 핵심은?",
+            "options": ["동결", "상장폐지", "분할", "배당"],
+            "answer_index": 0,
+            "explanation": "연준이 금리를 동결한 소식입니다.",
+        },
+        {
+            "quiz_id": "quiz-3",
+            "kind": "domain",
+            "question": "금리 동결은 보통 어디에 영향을 주나요?",
+            "options": ["시장 심리", "상품명", "로고", "임원 취미"],
+            "answer_index": 0,
+            "explanation": "금리 전망은 시장 심리와 자금 흐름에 영향을 줍니다.",
+        },
+    ]
+
+
+def test_quiz_response_hides_answer_and_explanation():
+    body = _quiz_response(82, _quizzes())
+
+    dumped = body.model_dump()
+    assert dumped["quizzes"][0]["quiz_id"] == "quiz-1"
+    assert "answer_index" not in dumped["quizzes"][0]
+    assert "explanation" not in dumped["quizzes"][0]
+
+
+@pytest.mark.asyncio
+async def test_submit_issue_quiz_scores_answers():
+    db = _QuizDB()
+
+    result = await submit_issue_quiz(
+        82,
+        QuizSubmitRequest(answers={"quiz-1": 0, "quiz-2": 1, "quiz-3": 0}),
+        db,
+    )
+
+    assert result.correct_count == 2
+    assert result.total_count == 3
+    assert result.results[1].answer_index == 0
+    assert result.results[1].is_correct is False
+
+
+@pytest.mark.asyncio
+async def test_get_issue_quiz_not_ready_returns_404():
+    with pytest.raises(Exception) as exc:
+        await get_issue_quiz(82, _QuizDB(quizzes=[]))
+
+    assert getattr(exc.value, "status_code", None) == 404
+
+
+def test_quiz_output_requires_fixed_kind_order():
+    output = QuizOutput(
+        quizzes=[
+            QuizQuestion(
+                quiz_id="quiz-1",
+                kind="issue",
+                question="q",
+                options=["a", "b", "c", "d"],
+                answer_index=0,
+                explanation="e",
+            ),
+            QuizQuestion(
+                quiz_id="quiz-2",
+                kind="term",
+                question="q",
+                options=["a", "b", "c", "d"],
+                answer_index=0,
+                explanation="e",
+            ),
+            QuizQuestion(
+                quiz_id="quiz-3",
+                kind="domain",
+                question="q",
+                options=["a", "b", "c", "d"],
+                answer_index=0,
+                explanation="e",
+            ),
+        ]
+    )
+
+    with pytest.raises(ValueError):
+        validate_quiz_output(output)
+
+
+class _QuizDB:
+    def __init__(self, quizzes=None):
+        self.row = SimpleNamespace(id=82, quizzes=_quizzes() if quizzes is None else quizzes)
+
+    async def get(self, _model, issue_id):
+        return self.row if issue_id == 82 else None

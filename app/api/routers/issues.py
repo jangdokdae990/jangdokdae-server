@@ -11,10 +11,14 @@ from app.api.models import (
     IssueListResponse,
     IssueReaderCardResponse,
     IssueTermResponse,
+    QuizResponse,
+    QuizSubmitRequest,
+    QuizSubmitResponse,
     SourceArticleResponse,
 )
 from app.db.base import get_db
 from app.db.orm_models.company_entity import CompanyEntity
+from app.db.orm_models.dictionary_term import DictionaryTerm
 from app.db.orm_models.issue_docent import IssueDocent
 from app.db.orm_models.news_analysis import NewsAnalysis
 from app.db.orm_models.news_cluster import NewsCluster
@@ -87,15 +91,20 @@ def _cards(content_heads: list[dict[str, Any]]) -> list[IssueReaderCardResponse]
     return cards
 
 
-def _terms(term_spans: list[dict[str, Any]]) -> list[IssueTermResponse]:
+def _terms(
+    term_spans: list[dict[str, Any]], definitions: dict[str, str] | None = None
+) -> list[IssueTermResponse]:
     seen: set[str] = set()
     terms: list[IssueTermResponse] = []
+    definitions = definitions or {}
     for span in term_spans or []:
         name = str(span.get("term") or "").strip()
         if not name or name in seen:
             continue
         seen.add(name)
-        terms.append(IssueTermResponse(name=name, definition="준비 중인 용어입니다."))
+        terms.append(
+            IssueTermResponse(name=name, definition=definitions.get(name, "준비 중인 용어입니다."))
+        )
     return terms
 
 
@@ -113,14 +122,35 @@ def _sources(articles: list[Any]) -> list[SourceArticleResponse]:
 
 
 def build_issue_detail(
-    docent: Any, cluster: Any | None, analysis: Any | None, articles: list[Any]
+    docent: Any,
+    cluster: Any | None,
+    analysis: Any | None,
+    articles: list[Any],
+    term_definitions: dict[str, str] | None = None,
 ) -> IssueDetailResponse:
     base = build_issue_list_item(docent, cluster, analysis)
     return IssueDetailResponse(
         **base.model_dump(),
         cards=_cards(getattr(docent, "content_heads", []) or []),
-        terms=_terms(getattr(docent, "term_spans", []) or []),
+        terms=_terms(getattr(docent, "term_spans", []) or [], term_definitions),
         sources=_sources(articles),
+    )
+
+
+def _quiz_response(issue_id: int, quizzes: list[dict[str, Any]]) -> QuizResponse:
+    if len(quizzes or []) != 3:
+        raise HTTPException(status_code=404, detail="Quiz not ready")
+    return QuizResponse(
+        issue_id=issue_id,
+        quizzes=[
+            {
+                "quiz_id": str(quiz.get("quiz_id")),
+                "kind": str(quiz.get("kind")),
+                "question": str(quiz.get("question")),
+                "options": list(quiz.get("options") or []),
+            }
+            for quiz in quizzes
+        ],
     )
 
 
@@ -207,4 +237,60 @@ async def get_issue(issue_id: int, db: AsyncSession = Depends(get_db)) -> IssueD
 
     docent, cluster, analysis = row
     articles = await get_cluster_articles(db, cluster.member_news_ids)
-    return build_issue_detail(docent, cluster, analysis, articles)
+    term_names = [
+        str(span.get("term") or "").strip()
+        for span in (docent.term_spans or [])
+        if str(span.get("term") or "").strip()
+    ]
+    dictionary_rows = (
+        await db.execute(
+            select(DictionaryTerm).where(DictionaryTerm.term.in_(set(term_names)))
+        )
+    ).scalars().all() if term_names else []
+    definitions = {row.term: row.definition for row in dictionary_rows if row.status == "approved"}
+    return build_issue_detail(docent, cluster, analysis, articles, definitions)
+
+
+@router.get("/{issue_id}/quiz", response_model=QuizResponse)
+async def get_issue_quiz(issue_id: int, db: AsyncSession = Depends(get_db)) -> QuizResponse:
+    docent = await db.get(IssueDocent, issue_id)
+    if docent is None:
+        raise HTTPException(status_code=404, detail="Issue not found")
+    return _quiz_response(issue_id, docent.quizzes or [])
+
+
+@router.post("/{issue_id}/quiz/submit", response_model=QuizSubmitResponse)
+async def submit_issue_quiz(
+    issue_id: int,
+    payload: QuizSubmitRequest,
+    db: AsyncSession = Depends(get_db),
+) -> QuizSubmitResponse:
+    docent = await db.get(IssueDocent, issue_id)
+    if docent is None:
+        raise HTTPException(status_code=404, detail="Issue not found")
+    quizzes = docent.quizzes or []
+    if len(quizzes) != 3:
+        raise HTTPException(status_code=404, detail="Quiz not ready")
+
+    results = []
+    for quiz in quizzes:
+        quiz_id = str(quiz.get("quiz_id"))
+        answer_index = int(quiz.get("answer_index"))
+        selected_index = payload.answers.get(quiz_id)
+        is_correct = selected_index == answer_index
+        results.append(
+            {
+                "quiz_id": quiz_id,
+                "kind": str(quiz.get("kind")),
+                "selected_index": selected_index,
+                "answer_index": answer_index,
+                "is_correct": is_correct,
+                "explanation": str(quiz.get("explanation") or ""),
+            }
+        )
+    return QuizSubmitResponse(
+        issue_id=issue_id,
+        correct_count=sum(1 for result in results if result["is_correct"]),
+        total_count=len(results),
+        results=results,
+    )

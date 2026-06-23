@@ -54,13 +54,14 @@ dictionary_terms
 - 같은 표기라도 의미가 갈라지는 경우는 마감 이후 `term_aliases` 또는 disambiguation으로 확장한다.
 - `definition`은 `candidate` 상태에서도 채울 수 있지만, UI에서 확정 설명으로 쓰는 기본값은 `approved` 우선이다.
 
-## 5. 후보 생성 흐름
+## 5. 용어 설명 생성·적재 흐름
 
 ```text
 issue_docent.term_spans
-  → distinct term 추출
+  → term 값만 추출
+  → distinct term 중복 제거
   → dictionary_terms.term 미존재 확인
-  → LLM 정의/예시 생성
+  → Google Vertex AI로 주린이용 정의/예시 생성
   → status=candidate 저장
   → 검수 후 approved
 ```
@@ -69,9 +70,21 @@ issue_docent.term_spans
 
 - Issue Detail API는 `approved` 정의가 있으면 사용한다.
 - 없으면 기존 fallback인 `"준비 중인 용어입니다."`를 유지한다.
-- 후보 생성은 콘텐츠 파이프라인 후속 노드 또는 백필 스크립트로 분리한다.
+- 후보를 정리한 뒤 용어마다 설명과 예시를 생성해 `dictionary_terms`에 적재한다.
+- 생성은 백필 스크립트(`scripts/backfill_dictionary_terms.py`)와 수동 API에서 재사용한다.
+- 후보 생성 입력은 `issue_docent.term_spans[*].term`만 사용한다. `sentence`는 본문 위치/맥락 참고용으로 남기되 dictionary 중복 판단 키로 쓰지 않는다.
+- 정의와 예시는 Google Vertex AI를 호출해 생성한다. 모델은 기존 Dictionary 생성 코드에서 사용하던 동일한 Vertex AI 모델 설정을 재사용한다.
+- 생성 문체는 주린이가 이해하기 쉬운 설명을 기준으로 하며, 설명 안에 또 다른 어려운 금융 용어를 늘어놓지 않는다.
 
-## 6. API 후보
+기존 `9990-jangdokdae/dictionary` 구현 기준:
+
+- 구현 구조는 LangChain + LangGraph 기반 파이프라인을 유지한다.
+- 모델 호출은 LangChain의 chat model 래퍼를 통해 수행한다.
+- 구현 기본 모델명은 `gemini-3-flash-preview`, fallback/cost 모델명은 `gemini-3.1-flash-lite-preview`다.
+- 실제 호출 전 `.env`의 `DICTIONARY_MODEL`, `DICTIONARY_FALLBACK_MODEL` 값을 우선 확인한다.
+- 서버 구현에서는 `jangdokdae-server`의 `uv.lock`에 이미 포함된 LangChain/LangGraph 계열 의존성을 우선 사용한다. 불필요한 새 LLM 프레임워크는 추가하지 않는다.
+
+## 6. API
 
 ```http
 GET /api/v1/dictionary?query=&type=&status=
@@ -106,8 +119,8 @@ Issue Detail tooltip에서 단건 조회할 수 있다.
 
 특정 `issue_docent`의 `term_spans`를 기준으로 후보를 생성한다.
 
-- 운영 자동 호출은 파이프라인 후속 노드에서 담당한다.
-- 수동 백필과 재처리를 위해 API 또는 script 둘 중 하나를 둔다.
+- 현재는 수동 후보 생성 API로 구현한다.
+- 운영 자동 호출은 파이프라인 후속 노드 또는 백필 스크립트로 추가한다.
 
 ## 7. 파이프라인 연결 위치
 
@@ -128,7 +141,7 @@ fetch → classify → enrich → generate issue_docent → extract dictionary c
 - 관계형 관련 이슈 테이블.
 - 용어 alias/disambiguation.
 - 사용자별 학습 완료/북마크.
-- Quiz 자동 생성.
+- Dictionary 승인 관리자 화면/API.
 - 기존 dictionary 레포 import.
 
 ## 9. 결정 필요

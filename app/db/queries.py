@@ -261,6 +261,7 @@ async def save_issue_docent(
     connection_module: list[dict],
     evidence_spans: list[dict],
     term_spans: list[dict],
+    quizzes: list[dict] | None = None,
 ) -> None:
     """생성 콘텐츠를 적재(클러스터당 1행, 중복 시 무시)."""
     stmt = (
@@ -273,6 +274,7 @@ async def save_issue_docent(
             connection_module=connection_module,
             evidence_spans=evidence_spans,
             term_spans=term_spans,
+            quizzes=quizzes or [],
         )
         .on_conflict_do_nothing(index_elements=["cluster_id"])
     )

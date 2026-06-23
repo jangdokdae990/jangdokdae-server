@@ -42,3 +42,50 @@ class IssueDetailResponse(IssueCardResponse):
     cards: list[IssueReaderCardResponse]
     terms: list[IssueTermResponse]
     sources: list[SourceArticleResponse]
+
+
+class QuizQuestionResponse(BaseModel):
+    quiz_id: str
+    kind: str
+    question: str
+    options: list[str]
+
+
+class QuizResponse(BaseModel):
+    issue_id: int
+    quizzes: list[QuizQuestionResponse]
+
+
+class QuizSubmitRequest(BaseModel):
+    answers: dict[str, int]
+
+
+class QuizAnswerResultResponse(BaseModel):
+    quiz_id: str
+    kind: str
+    selected_index: int | None
+    answer_index: int
+    is_correct: bool
+    explanation: str
+
+
+class QuizSubmitResponse(BaseModel):
+    issue_id: int
+    correct_count: int
+    total_count: int
+    results: list[QuizAnswerResultResponse]
+
+
+class DictionaryTermResponse(BaseModel):
+    id: int
+    term: str
+    term_type: str
+    definition: str
+    example: str | None
+    source: str
+    status: str
+
+
+class DictionaryCandidateResponse(BaseModel):
+    created: list[DictionaryTermResponse]
+    skipped: list[str]

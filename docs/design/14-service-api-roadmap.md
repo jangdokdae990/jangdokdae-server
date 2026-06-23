@@ -79,8 +79,9 @@
 
 | 기능 | 필요한 저장소 | 우선순위 |
 | --- | --- | --- |
-| Dictionary | `dictionary_terms` | P4 |
-| Quiz | `quizzes`, `quiz_results` | P5 |
+| Dictionary | `dictionary_terms` | P0 진행 |
+| Quiz | `issue_docent.quizzes` | P1 진행 |
+| Quiz result | `quiz_results` | 후속 |
 | Bookmark | `issue_bookmarks` | P6 |
 | Read activity | `issue_reads` | P6 |
 | Search suggestions | 별도 저장소 없이 query 조합 가능 | P7 |
@@ -93,7 +94,7 @@
 권장 결정:
 
 - `dictionary_terms.term` 전역 unique.
-- 후보 생성은 API보다 script 먼저.
+- 후보 생성은 `POST /api/v1/dictionary/candidates/from-issue/{issue_id}` 먼저.
 - 사용자 화면은 `approved` 우선, 없으면 fallback.
 
 ## 5. 1차에서 유지할 mock
@@ -103,7 +104,7 @@
 | Quiz | 문항/정답/결과 | 테이블 없음 |
 | My Page | stats, read history, quiz history | 테이블 없음 |
 | Home | 개인화 관심 이슈 | auth/onboarding 연동 이후 |
-| Dictionary | 전체 사전 목록 | table/API 구현 전 |
+| Dictionary | 검수/승인된 용어가 부족한 경우 기존 mock fallback | 초기 데이터 부족 |
 | Issue thumbnails | AI 이미지 | asset 저장소 없음 |
 
 ## 6. 다음 PR 추천 순서
@@ -111,5 +112,13 @@
 1. Onboarding FE id 기반 전환 + master API 연동.
 2. My Page profile/interests API 연동.
 3. Home issue list API 연동.
-4. Dictionary migration/API/script.
+4. Dictionary 백필 script와 승인 플로우.
 5. Quiz schema/API.
+
+## 7. 현재 완전 구현 목표
+
+우선순위는 Dictionary → Quiz → Onboarding → My Page → Home이다.
+
+- Dictionary: `term_spans[*].term` 추출·중복 제거 → LangChain+LangGraph+Vertex AI(`gemini-3-flash-preview` 계열)로 설명/예시 생성 → `dictionary_terms(status=candidate)` 적재 → API/프론트 툴팁 연결.
+- Quiz: 기존 v1 LangGraph 흐름을 유지하고 `term`/`issue`/`domain` 3문항 고정으로 확장한다. 저장소는 별도 `quizzes` 테이블이 아니라 `issue_docent.quizzes` JSONB다. 기존 데이터는 quiz-only 백필한다.
+- 운영 DB 마이그레이션은 코드 검증 후 별도 단계로 `alembic current` 확인 → `alembic upgrade head` → 스모크 테스트 순서로 적용한다.
