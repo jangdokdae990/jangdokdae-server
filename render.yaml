@@ -1,0 +1,42 @@
+# Render 배포 설정 — 장독대 API 전용 (데이터 수집/Airflow는 별도 운영).
+# 시크릿(DATABASE_URL, SECRET_KEY, OAuth 등)은 sync:false로 두고 Render 대시보드에서 직접 입력한다.
+services:
+  - type: web
+    name: jangdokdae-api
+    runtime: python
+    plan: starter
+    rootDir: jangdokdae-server
+    buildCommand: pip install -r requirements-api.txt
+    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /health
+    envVars:
+      - key: PYTHON_VERSION
+        value: "3.12.5"
+      - key: DEBUG
+        value: "False"
+      - key: COOKIE_SECURE
+        value: "true"
+      # FE(Vercel)와 BE 도메인이 달라 cross-site 쿠키 전송 필요 → none 필수
+      - key: COOKIE_SAMESITE
+        value: "none"
+      # --- 아래는 대시보드에서 값 입력 (시크릿/도메인 확정 후) ---
+      - key: DATABASE_URL          # Neon 연결 문자열 (...?sslmode=require)
+        sync: false
+      - key: SECRET_KEY            # openssl rand -hex 32
+        sync: false
+      - key: CORS_ORIGINS          # Vercel 프론트 도메인(콤마 구분)
+        sync: false
+      - key: FRONTEND_BASE_URL     # Vercel 프론트 URL (로그인/온보딩 redirect 대상)
+        sync: false
+      - key: OAUTH_KAKAO_CLIENT_ID
+        sync: false
+      - key: OAUTH_KAKAO_CLIENT_SECRET
+        sync: false
+      - key: OAUTH_KAKAO_REDIRECT_URI   # https://<render-url>/api/v1/auth/kakao/callback
+        sync: false
+      - key: OAUTH_GOOGLE_CLIENT_ID
+        sync: false
+      - key: OAUTH_GOOGLE_CLIENT_SECRET
+        sync: false
+      - key: OAUTH_GOOGLE_REDIRECT_URI  # https://<render-url>/api/v1/auth/google/callback
+        sync: false
