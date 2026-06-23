@@ -3,9 +3,12 @@ from typing import Any, Literal
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import Integer, false, func, select, type_coerce
 from sqlalchemy.dialects.postgresql import ARRAY as PG_ARRAY
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.models import (
+    BookmarkUpdateRequest,
+    IssueActivityMutationResponse,
     IssueCardResponse,
     IssueDetailResponse,
     IssueListResponse,
@@ -16,12 +19,14 @@ from app.api.models import (
     QuizSubmitResponse,
     SourceArticleResponse,
 )
-from app.db.base import get_db
+from app.core.security import get_current_user, get_current_user_optional
+from app.db.base import KST_NOW, get_db
 from app.db.orm_models.company_entity import CompanyEntity
 from app.db.orm_models.dictionary_term import DictionaryTerm
 from app.db.orm_models.issue_docent import IssueDocent
 from app.db.orm_models.news_analysis import NewsAnalysis
 from app.db.orm_models.news_cluster import NewsCluster
+from app.db.orm_models.user_issue_activity import UserIssueActivity
 from app.db.queries import get_cluster_articles
 
 router = APIRouter(prefix="/issues", tags=["issues"])
@@ -259,11 +264,80 @@ async def get_issue_quiz(issue_id: int, db: AsyncSession = Depends(get_db)) -> Q
     return _quiz_response(issue_id, docent.quizzes or [])
 
 
+@router.post("/{issue_id}/read", response_model=IssueActivityMutationResponse)
+async def mark_issue_read(
+    issue_id: int,
+    user_id: int = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> IssueActivityMutationResponse:
+    if await db.get(IssueDocent, issue_id) is None:
+        raise HTTPException(status_code=404, detail="Issue not found")
+    values = {"read_at": KST_NOW, "updated_at": KST_NOW}
+    await db.execute(
+        pg_insert(UserIssueActivity)
+        .values(user_id=user_id, issue_docent_id=issue_id, **values)
+        .on_conflict_do_update(
+            index_elements=["user_id", "issue_docent_id"],
+            set_=values,
+        )
+    )
+    await db.commit()
+    return IssueActivityMutationResponse(issue_id=issue_id)
+
+
+@router.put("/{issue_id}/bookmark", response_model=IssueActivityMutationResponse)
+async def update_issue_bookmark(
+    issue_id: int,
+    payload: BookmarkUpdateRequest,
+    user_id: int = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> IssueActivityMutationResponse:
+    if await db.get(IssueDocent, issue_id) is None:
+        raise HTTPException(status_code=404, detail="Issue not found")
+    values = {
+        "bookmarked_at": KST_NOW if payload.bookmarked else None,
+        "updated_at": KST_NOW,
+    }
+    await db.execute(
+        pg_insert(UserIssueActivity)
+        .values(user_id=user_id, issue_docent_id=issue_id, **values)
+        .on_conflict_do_update(
+            index_elements=["user_id", "issue_docent_id"],
+            set_=values,
+        )
+    )
+    await db.commit()
+    return IssueActivityMutationResponse(issue_id=issue_id)
+
+
+@router.get("/{issue_id}/quiz/result", response_model=QuizSubmitResponse)
+async def get_issue_quiz_result(
+    issue_id: int,
+    user_id: int = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> QuizSubmitResponse:
+    activity = await db.scalar(
+        select(UserIssueActivity).where(
+            UserIssueActivity.user_id == user_id,
+            UserIssueActivity.issue_docent_id == issue_id,
+        )
+    )
+    if activity is None or activity.quiz_completed_at is None:
+        raise HTTPException(status_code=404, detail="Quiz result not found")
+    return QuizSubmitResponse(
+        issue_id=issue_id,
+        correct_count=activity.quiz_correct_count or 0,
+        total_count=activity.quiz_total_count or 0,
+        results=activity.quiz_results or [],
+    )
+
+
 @router.post("/{issue_id}/quiz/submit", response_model=QuizSubmitResponse)
 async def submit_issue_quiz(
     issue_id: int,
     payload: QuizSubmitRequest,
     db: AsyncSession = Depends(get_db),
+    user_id: int | None = Depends(get_current_user_optional),
 ) -> QuizSubmitResponse:
     docent = await db.get(IssueDocent, issue_id)
     if docent is None:
@@ -288,9 +362,28 @@ async def submit_issue_quiz(
                 "explanation": str(quiz.get("explanation") or ""),
             }
         )
+    correct_count = sum(1 for result in results if result["is_correct"])
+    if user_id is not None:
+        values = {
+            "quiz_answers": payload.answers,
+            "quiz_results": results,
+            "quiz_correct_count": correct_count,
+            "quiz_total_count": len(results),
+            "quiz_completed_at": KST_NOW,
+            "updated_at": KST_NOW,
+        }
+        await db.execute(
+            pg_insert(UserIssueActivity)
+            .values(user_id=user_id, issue_docent_id=issue_id, **values)
+            .on_conflict_do_update(
+                index_elements=["user_id", "issue_docent_id"],
+                set_=values,
+            )
+        )
+        await db.commit()
     return QuizSubmitResponse(
         issue_id=issue_id,
-        correct_count=sum(1 for result in results if result["is_correct"]),
+        correct_count=correct_count,
         total_count=len(results),
         results=results,
     )

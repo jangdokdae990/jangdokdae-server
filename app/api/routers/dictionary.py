@@ -1,9 +1,15 @@
-from fastapi import APIRouter, Depends, HTTPException, Query
+from secrets import compare_digest
+
+from fastapi import APIRouter, Depends, Header, HTTPException, Query
 from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.models import DictionaryCandidateResponse, DictionaryTermResponse
+from app.api.models import (
+    DictionaryCandidateResponse,
+    DictionaryStatusUpdateRequest,
+    DictionaryTermResponse,
+)
 from app.config import settings
 from app.db.base import get_db
 from app.db.orm_models.dictionary_term import DictionaryTerm
@@ -41,6 +47,8 @@ async def list_dictionary_terms(
     q: str | None = Query(default=None),
     type: str | None = Query(default=None),
     status: str | None = Query(default=None),
+    limit: int = Query(default=100, ge=1, le=500),
+    offset: int = Query(default=0, ge=0),
     db: AsyncSession = Depends(get_db),
 ) -> list[DictionaryTermResponse]:
     filters = []
@@ -52,7 +60,11 @@ async def list_dictionary_terms(
         filters.append(DictionaryTerm.status == status)
     rows = (
         await db.execute(
-            select(DictionaryTerm).where(*filters).order_by(DictionaryTerm.term).limit(100)
+            select(DictionaryTerm)
+            .where(*filters)
+            .order_by(DictionaryTerm.term)
+            .limit(limit)
+            .offset(offset)
         )
     ).scalars().all()
     return [_response(row) for row in rows]
@@ -65,6 +77,26 @@ async def get_dictionary_term(
     row = await db.scalar(select(DictionaryTerm).where(DictionaryTerm.term == term))
     if row is None:
         raise HTTPException(status_code=404, detail="Dictionary term not found")
+    return _response(row)
+
+
+@router.patch("/{term}/status", response_model=DictionaryTermResponse)
+async def update_dictionary_term_status(
+    term: str,
+    payload: DictionaryStatusUpdateRequest,
+    x_dictionary_admin_token: str | None = Header(default=None),
+    db: AsyncSession = Depends(get_db),
+) -> DictionaryTermResponse:
+    if not settings.dictionary_admin_token or not x_dictionary_admin_token or not compare_digest(
+        x_dictionary_admin_token, settings.dictionary_admin_token
+    ):
+        raise HTTPException(status_code=403, detail="Dictionary admin token required")
+
+    row = await db.scalar(select(DictionaryTerm).where(DictionaryTerm.term == term))
+    if row is None:
+        raise HTTPException(status_code=404, detail="Dictionary term not found")
+    row.status = payload.status
+    await db.commit()
     return _response(row)
 
 

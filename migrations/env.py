@@ -16,6 +16,7 @@ from app.db.base import Base
 # 모델 등록 — import만으로 Base.metadata에 테이블이 붙는다(autogenerate 대상).
 from app.db.orm_models import (  # noqa: F401
     company_entity,
+    dictionary_term,
     disclosure,
     financial_statement,
     issue_docent,
@@ -33,6 +34,7 @@ from app.db.orm_models import (  # noqa: F401
     user_interest_company,
     user_interest_market,
     user_interest_sector,
+    user_issue_activity,
 )
 
 config = context.config

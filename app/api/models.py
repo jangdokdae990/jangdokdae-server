@@ -1,4 +1,5 @@
 from datetime import datetime
+from typing import Literal
 
 from pydantic import BaseModel
 
@@ -76,6 +77,15 @@ class QuizSubmitResponse(BaseModel):
     results: list[QuizAnswerResultResponse]
 
 
+class BookmarkUpdateRequest(BaseModel):
+    bookmarked: bool
+
+
+class IssueActivityMutationResponse(BaseModel):
+    issue_id: int
+    ok: bool = True
+
+
 class DictionaryTermResponse(BaseModel):
     id: int
     term: str
@@ -89,3 +99,7 @@ class DictionaryTermResponse(BaseModel):
 class DictionaryCandidateResponse(BaseModel):
     created: list[DictionaryTermResponse]
     skipped: list[str]
+
+
+class DictionaryStatusUpdateRequest(BaseModel):
+    status: Literal["approved", "rejected"]
