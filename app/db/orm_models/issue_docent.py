@@ -8,11 +8,9 @@ span을 클러스터당 1행으로 적재한다. 발행 전까지 is_published=F
 from datetime import datetime
 
 from sqlalchemy import (
-    ARRAY,
     Boolean,
     DateTime,
     ForeignKey,
-    Index,
     Integer,
     String,
     UniqueConstraint,
@@ -28,9 +26,6 @@ class IssueDocent(Base):
     __tablename__ = "issue_docent"
     __table_args__ = (
         UniqueConstraint("cluster_id", name="uq_issue_docent_cluster"),
-        Index("ix_issue_docent_market_ids", "market_ids", postgresql_using="gin"),
-        Index("ix_issue_docent_sector_ids", "sector_ids", postgresql_using="gin"),
-        Index("ix_issue_docent_company_ids", "company_ids", postgresql_using="gin"),
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
@@ -38,15 +33,6 @@ class IssueDocent(Base):
         Integer, ForeignKey("news_cluster.id"), nullable=False
     )
     title: Mapped[str] = mapped_column(String(500), nullable=False)
-    market_ids: Mapped[list[int]] = mapped_column(
-        ARRAY(Integer), nullable=False, server_default=text("'{}'::integer[]")
-    )
-    sector_ids: Mapped[list[int]] = mapped_column(
-        ARRAY(Integer), nullable=False, server_default=text("'{}'::integer[]")
-    )
-    company_ids: Mapped[list[int]] = mapped_column(
-        ARRAY(Integer), nullable=False, server_default=text("'{}'::integer[]")
-    )
     # {"pain": "...", "neutral": "..."}
     hook_lines: Mapped[dict] = mapped_column(
         JSONB, nullable=False, server_default=text("'{}'::jsonb")
