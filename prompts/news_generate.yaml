@@ -116,11 +116,13 @@ system: |
 
   # 출력
   아래 JSON만 출력한다. 다른 텍스트, 설명, 마크다운 금지.
+  - title: 주린이가 한눈에 무슨 이슈인지 알 수 있는 제목 한 줄(30자 내외). 기사 원문 헤드라인을 베끼지 말고 이슈 핵심을 담백하게 요약한다. 종목 추천·방향 예측·금지 표현을 쓰지 않는다(본문 규칙과 동일).
   - answers: head1~head4 답변을 순서대로 정확히 4개 담는다. 각 답변은 해당 head의 질문에 대한 답이며 2~4문장이다(head1은 1~2문장).
   - hook_lines: pain·neutral 2가지 첫 줄. 위 첫 줄 규칙을 지킨다.
   - evidence_spans: (A) 단정형으로 쓴 핵심 사실만 적는다. head는 "head1"~"head4", claim은 본문에서 단정한 사실, sentence는 그 근거가 된 기사 문장. (B) 추론형 문장은 적지 않는다.
   - term_spans, connection_module도 함께 출력한다.
   {
+    "title": "이슈를 요약한 제목 한 줄",
     "answers": ["head1 답변", "head2 답변", "head3 답변", "head4 답변"],
     "hook_lines": {"pain": "걱정·궁금증으로 말 거는 질문형 한 줄", "neutral": "중립 요약 한 줄"},
     "evidence_spans": [{"head": "head2", "claim": "본문에서 단정한 핵심 사실", "sentence": "그 근거가 된 기사 문장"}],
@@ -149,4 +151,4 @@ user_template: |
   {sub_facts}
 
   {enrichment}
-  출력: answers에 head1~head4 답변을 순서대로 정확히 4개 담는다. 각 답변은 해당 head 질문에 대한 답이며 2~4문장(head1은 1~2문장)이다. hook_lines에 pain·neutral 첫 줄 2개를 담는다. 단정형으로 쓴 핵심 사실은 evidence_spans에 근거 문장과 함께 적는다.
+  출력: title에 이슈를 요약한 제목 한 줄(30자 내외, 원문 헤드라인 복사 금지)을 담는다. answers에 head1~head4 답변을 순서대로 정확히 4개 담는다. 각 답변은 해당 head 질문에 대한 답이며 2~4문장(head1은 1~2문장)이다. hook_lines에 pain·neutral 첫 줄 2개를 담는다. 단정형으로 쓴 핵심 사실은 evidence_spans에 근거 문장과 함께 적는다.

@@ -26,7 +26,7 @@ from app.db.orm_models.sector import Sector
 logger = logging.getLogger(__name__)
 
 # 버킷 우선순위(서로소 배정). 뒤집고 싶으면 이 한 줄만 바꾼다.
-OVERSEAS_BUCKET_PRIORITY = ("US_ETF", "NASDAQ", "SP500")
+OVERSEAS_BUCKET_PRIORITY = ("USETF", "NASDAQ", "SP500")
 
 # FDR S&P500 리스팅의 GICS 영문 섹터명 → sectors.gics_code(섹터 레벨 2자리).
 # Sector.name_en이 동일 GICS 영문명이지만, 표기 흔들림(Health Care 등)에 안전하도록 명시 매핑한다.
@@ -129,7 +129,7 @@ def build_overseas_records(
 
     # 1) ETF — 최우선 버킷
     for ticker, name_ko in etf_seed:
-        records[ticker] = _record(ticker, name_ko, ticker, "US_ETF", None)
+        records[ticker] = _record(ticker, name_ko, ticker, "USETF", None)
 
     # 2) NASDAQ-100 — 상장 거래소 기준 우선. 이름은 S&P500→NASDAQ 리스팅→티커 순 폴백.
     for ticker in sorted(NASDAQ_100_TICKERS):
@@ -183,7 +183,7 @@ async def sync_overseas_companies(db: AsyncSession) -> dict[str, int]:
     """해외 종목 유니버스를 company_entities에 동기화(upsert).
 
     Returns:
-        {"total": 적재 종목 수, "US_ETF"/"NASDAQ"/"SP500": 버킷별 수}
+        {"total": 적재 종목 수, "USETF"/"NASDAQ"/"SP500": 버킷별 수}
     """
     logger.info("FDR S&P500 / NASDAQ 리스팅 조회 중...")
     sp500, nasdaq_name_map = await asyncio.gather(

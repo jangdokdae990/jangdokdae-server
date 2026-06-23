@@ -27,6 +27,15 @@ FORBIDDEN_WORDS: list[str] = [
     "확실하다", "분명하다", "급등 예상", "상승 기대",
 ]
 
+# honest-blank(원문에 내용이 없어 "기사에 …없습니다"로 회피한) 답변을 식별하는 문구.
+# head 다수가 이 문구를 담으면 발행 가치가 없어 needs_review로 격리한다(설계 15).
+BLANK_PHRASES: list[str] = [
+    "담고 있지 않", "제시되지 않았", "제시하고 있지 않", "포함하고 있지 않",
+    "언급하고 있지 않", "나타나 있지 않", "되어 있지 않",
+    "분석하기 어렵", "판단하기 어렵", "확인하기 어렵",
+    "구체적인 정보가 없", "내용이 없", "찾아볼 수 없", "알 수 없",
+]
+
 
 def get_user_label(frame: str) -> str:
     """사용자에게 노출되는 frame 한글 이름 (예: EARNINGS → '실적이 나왔어요')."""
@@ -54,3 +63,8 @@ def find_forbidden_words(text: str) -> list[str]:
         if word in text and word not in found:
             found.append(word)
     return found
+
+
+def count_blank_heads(answers: list[str]) -> int:
+    """honest-blank 문구를 포함한 head 답변 수 — 발행 무가치 판정용(설계 15)."""
+    return sum(1 for a in answers if any(p in (a or "") for p in BLANK_PHRASES))

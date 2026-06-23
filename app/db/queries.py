@@ -4,6 +4,7 @@
 부분 실패 후 재실행해도 남은 것만 처리된다(멱등).
 """
 
+import re
 from datetime import date, datetime
 
 from sqlalchemy import (
@@ -40,15 +41,48 @@ from app.db.orm_models.user_interest_market import UserInterestMarket
 from app.db.orm_models.user_interest_sector import UserInterestSector
 
 # 온보딩 시장 코드 → CompanyEntity.market 매핑. 해외는 버킷 코드가 곧 market 값(identity).
-# GLOBAL(기타 해외)은 적재 종목이 없어 매핑을 비워 둔다(필터 시 빈 결과로 수렴).
+# GLOBAL(기타 해외)은 온보딩에서 글로벌 지수 4종(유로스톡스·닛케이·항셍·CSI300)을 묶는 칩이라
+# 4종 거래소 전부로 풀어 합집합 필터한다(개별 지수 칩은 비노출). 개별 코드 매핑도 남겨 둬
+# 직접 코드 필터(예: ?market=NIKKEI)도 계속 동작하게 한다.
 MARKET_CODE_TO_EXCHANGES: dict[str, tuple[str, ...]] = {
     "KOSPI": ("KOSPI",),
     "KOSDAQ": ("KOSDAQ",),
     "NASDAQ": ("NASDAQ",),
     "SP500": ("SP500",),
-    "US_ETF": ("US_ETF",),
+    "USETF": ("USETF",),
+    "EUROSTOXX": ("EUROSTOXX",),
+    "NIKKEI": ("NIKKEI",),
+    "HANGSENG": ("HANGSENG",),
+    "CSI300": ("CSI300",),
+    "GLOBAL": ("EUROSTOXX", "NIKKEI", "HANGSENG", "CSI300"),
 }
 
+
+def _normalize_market_code(token: str) -> str:
+    """시장 코드 정규화 — 대소문자·구분자(공백/하이픈/언더스코어) 흔들림을 흡수한다.
+
+    구분자를 모두 제거하고 대문자화해 'US ETF'·'us-etf'·구(舊) 'US_ETF'를 모두 정식 코드
+    'USETF'로 수렴시킨다. 시장 코드는 전부 구분자 없는 형태(KOSPI·SP500·USETF…)로 통일했으므로,
+    클라이언트 표기 흔들림이 빈 결과로 빠지지 않게 막는 안전망이다.
+    """
+    return re.sub(r"[\s_-]+", "", token.strip()).upper()
+
+
+# 정규화 키 → 정식 코드. 표기 흔들림(소문자·'US ETF' 등)을 정식 코드로 되돌린다.
+_NORMALIZED_TO_MARKET_CODE: dict[str, str] = {
+    _normalize_market_code(code): code for code in MARKET_CODE_TO_EXCHANGES
+}
+
+
+def _resolve_market_exchanges(market_codes: tuple[str, ...]) -> list[str]:
+    """시장 코드(다중)를 거래소 목록으로 해소. 표기 흔들림은 정규화로 흡수하고,
+    매핑 없는 코드(GLOBAL·미상)는 버려 빈 결과로 수렴시킨다(억지 매칭 금지)."""
+    exchanges: list[str] = []
+    for code in market_codes:
+        canonical = _NORMALIZED_TO_MARKET_CODE.get(_normalize_market_code(code))
+        if canonical:
+            exchanges.extend(MARKET_CODE_TO_EXCHANGES[canonical])
+    return exchanges
 
 def _escape_like(value: str) -> str:
     """LIKE 메타문자(\\,%,_)를 이스케이프 — 사용자 입력이 와일드카드로 해석되지 않게 한다.
@@ -304,6 +338,9 @@ async def save_issue_docent(
     *,
     cluster_id: int,
     title: str,
+    market_ids: list[int],
+    sector_ids: list[int],
+    company_ids: list[int],
     hook_lines: dict,
     content_heads: list[dict],
     connection_module: list[dict],
@@ -311,12 +348,19 @@ async def save_issue_docent(
     term_spans: list[dict],
     quizzes: list[dict] | None = None,
 ) -> None:
-    """생성 콘텐츠를 적재(클러스터당 1행, 중복 시 무시)."""
+    """생성 콘텐츠를 적재(클러스터당 1행, 중복 시 무시).
+
+    market_ids·sector_ids·company_ids는 온보딩 관심사 기반 피드 필터의 조인 키 —
+    분류 단계에서 해소된 값을 그대로 받는다(news_analysis와 동일 소스).
+    """
     stmt = (
         pg_insert(IssueDocent)
         .values(
             cluster_id=cluster_id,
             title=title,
+            market_ids=market_ids,
+            sector_ids=sector_ids,
+            company_ids=company_ids,
             hook_lines=hook_lines,
             content_heads=content_heads,
             connection_module=connection_module,
@@ -387,6 +431,37 @@ async def resolve_sector_ids(db: AsyncSession, names: list[str]) -> list[int]:
         return []
     result = await db.execute(select(Sector.id).where(Sector.name_ko.in_(wanted)))
     return sorted({row[0] for row in result.all()})
+
+
+# 종목으로 market이 안 잡히는 해외 이슈의 폴백 — markets.code "GLOBAL"(기타 해외 시장).
+_OVERSEAS_FALLBACK_MARKET_CODE = "GLOBAL"
+
+
+async def resolve_market_ids(
+    db: AsyncSession, company_ids: list[int], origin: str
+) -> list[int]:
+    """이슈와 연관된 markets.id를 해소 — issue_docent 관심사 매칭 백필.
+
+    종목의 거래소(CompanyEntity.market: KOSPI/KOSDAQ)를 markets.code와 일치시켜 해소한다
+    (종목 유니버스는 국내뿐이라 종목 기반은 KOSPI/KOSDAQ로 수렴). 종목으로 못 잡고 origin이
+    해외면 GLOBAL(기타 해외 시장)로 폴백, 국내인데 종목이 없으면 빈 리스트(시장 전체 등).
+    """
+    if company_ids:
+        result = await db.execute(
+            select(Market.id)
+            .join(CompanyEntity, CompanyEntity.market == Market.code)
+            .where(CompanyEntity.id.in_(company_ids))
+            .distinct()
+        )
+        ids = sorted({row[0] for row in result.all()})
+        if ids:
+            return ids
+    if origin == "해외":
+        result = await db.execute(
+            select(Market.id).where(Market.code == _OVERSEAS_FALLBACK_MARKET_CODE)
+        )
+        return sorted({row[0] for row in result.all()})
+    return []
 
 
 async def get_latest_stock_price(db: AsyncSession, stock_code: str) -> StockPrice | None:
@@ -565,19 +640,15 @@ async def search_companies(
 ) -> list[CompanyEntity]:
     """활성 종목을 필터·검색·커서 페이지네이션으로 조회.
 
-    market_codes(다중 선택 가능)는 각 코드를 거래소(KOSPI/KOSDAQ/NASDAQ/SP500/US_ETF)로 풀어
+    market_codes(다중 선택 가능)는 각 코드를 거래소(KOSPI/KOSDAQ/NASDAQ/SP500/USETF)로 풀어
     합집합 필터한다. cursor는 직전 페이지 마지막 id로, id 오름차순에서 그 다음부터 limit개.
     """
     stmt = select(CompanyEntity).where(CompanyEntity.is_active.is_(True))
     if sector_id is not None:
         stmt = stmt.where(CompanyEntity.sector_id == sector_id)
     if market_codes:
-        exchanges = [
-            exch
-            for code in market_codes
-            for exch in MARKET_CODE_TO_EXCHANGES.get(code, ())
-        ]
         # 매핑 없는 시장(GLOBAL 등)만 선택되면 빈 결과로 수렴(in_([]) → no rows).
+        exchanges = _resolve_market_exchanges(market_codes)
         stmt = stmt.where(CompanyEntity.market.in_(exchanges))
     if q:
         escaped = _escape_like(q)
