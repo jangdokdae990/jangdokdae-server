@@ -29,12 +29,18 @@ _markets = sa.table(
     sa.column("is_active", sa.Boolean),
 )
 
-# 글로벌 지수 4종(전부 활성). created_at은 서버 기본값(KST_NOW)에 맡긴다.
+# 글로벌 지수 4종. 온보딩에선 GLOBAL(기타 해외) 칩 하나로 묶어 노출하므로 개별 시장은
+# is_active=False로 시드해 칩에서 가린다(get_active_markets는 활성만 반환). 종목 자체는
+# company_entities에 is_active=True로 적재돼 GLOBAL 필터로 잡힌다(queries.MARKET_CODE_TO_EXCHANGES).
+# created_at은 서버 기본값(KST_NOW)에 맡긴다.
 _GLOBAL_MARKETS = [
-    {"code": "EUROSTOXX", "name_ko": "유로스톡스50", "name_en": "EURO STOXX 50", "is_active": True},
-    {"code": "NIKKEI", "name_ko": "닛케이225", "name_en": "Nikkei 225", "is_active": True},
-    {"code": "HANGSENG", "name_ko": "항셍", "name_en": "Hang Seng", "is_active": True},
-    {"code": "CSI300", "name_ko": "중국 CSI300", "name_en": "CSI 300", "is_active": True},
+    {
+        "code": "EUROSTOXX", "name_ko": "유로스톡스50",
+        "name_en": "EURO STOXX 50", "is_active": False,
+    },
+    {"code": "NIKKEI", "name_ko": "닛케이225", "name_en": "Nikkei 225", "is_active": False},
+    {"code": "HANGSENG", "name_ko": "항셍", "name_en": "Hang Seng", "is_active": False},
+    {"code": "CSI300", "name_ko": "중국 CSI300", "name_en": "CSI 300", "is_active": False},
 ]
 
 _CODES = tuple(m["code"] for m in _GLOBAL_MARKETS)

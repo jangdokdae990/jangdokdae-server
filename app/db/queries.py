@@ -41,7 +41,9 @@ from app.db.orm_models.user_interest_market import UserInterestMarket
 from app.db.orm_models.user_interest_sector import UserInterestSector
 
 # 온보딩 시장 코드 → CompanyEntity.market 매핑. 해외는 버킷 코드가 곧 market 값(identity).
-# GLOBAL(기타 해외)은 적재 종목이 없어 매핑을 비워 둔다(필터 시 빈 결과로 수렴).
+# GLOBAL(기타 해외)은 온보딩에서 글로벌 지수 4종(유로스톡스·닛케이·항셍·CSI300)을 묶는 칩이라
+# 4종 거래소 전부로 풀어 합집합 필터한다(개별 지수 칩은 비노출). 개별 코드 매핑도 남겨 둬
+# 직접 코드 필터(예: ?market=NIKKEI)도 계속 동작하게 한다.
 MARKET_CODE_TO_EXCHANGES: dict[str, tuple[str, ...]] = {
     "KOSPI": ("KOSPI",),
     "KOSDAQ": ("KOSDAQ",),
@@ -52,6 +54,7 @@ MARKET_CODE_TO_EXCHANGES: dict[str, tuple[str, ...]] = {
     "NIKKEI": ("NIKKEI",),
     "HANGSENG": ("HANGSENG",),
     "CSI300": ("CSI300",),
+    "GLOBAL": ("EUROSTOXX", "NIKKEI", "HANGSENG", "CSI300"),
 }
 
 
