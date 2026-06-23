@@ -38,6 +38,7 @@ async def generate_dictionary_draft(term: str) -> DictionaryDraft:
             "너는 초보 투자자를 위한 주식/경제 용어 사전 작성자다.\n"
             "어려운 금융 용어를 또 늘어놓지 말고 쉽게 설명한다.\n"
             "투자 조언이나 매수/매도 판단은 하지 않는다.\n"
+            "정의와 예시의 모든 문장은 '~입니다/~합니다' 문체로 통일한다.\n"
             f"용어: {state['term']}"
         )
         draft = await _llm(settings.dictionary_model).ainvoke(prompt)

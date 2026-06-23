@@ -9,14 +9,17 @@ os.environ.setdefault("SECRET_KEY", "test-secret")
 
 import pytest
 
-from app.api.models import QuizSubmitRequest
+from app.api.models import BookmarkUpdateRequest, QuizSubmitRequest
 from app.api.routers.issues import (
     _array_overlaps,
     _quiz_response,
     build_issue_detail,
     build_issue_list_item,
     get_issue_quiz,
+    get_issue_quiz_result,
+    mark_issue_read,
     submit_issue_quiz,
+    update_issue_bookmark,
 )
 from app.db.orm_models.news_analysis import NewsAnalysis
 from services.analyzer.quiz_generator import validate_quiz_output
@@ -147,6 +150,61 @@ async def test_submit_issue_quiz_scores_answers():
 
 
 @pytest.mark.asyncio
+async def test_submit_issue_quiz_persists_authenticated_result():
+    db = _QuizDB()
+
+    await submit_issue_quiz(
+        82,
+        QuizSubmitRequest(answers={"quiz-1": 0, "quiz-2": 1, "quiz-3": 0}),
+        db,
+        user_id=7,
+    )
+
+    assert db.committed is True
+    assert db.executed is True
+
+
+@pytest.mark.asyncio
+async def test_read_and_bookmark_mutations_are_persisted():
+    db = _QuizDB()
+
+    await mark_issue_read(82, user_id=7, db=db)
+    await update_issue_bookmark(
+        82,
+        BookmarkUpdateRequest(bookmarked=True),
+        user_id=7,
+        db=db,
+    )
+
+    assert db.commit_count == 2
+
+
+@pytest.mark.asyncio
+async def test_get_saved_quiz_result_returns_latest_attempt():
+    activity = SimpleNamespace(
+        issue_docent_id=82,
+        quiz_correct_count=2,
+        quiz_total_count=3,
+        quiz_completed_at=datetime(2026, 6, 23, 10, 5),
+        quiz_results=[
+            {
+                "quiz_id": "quiz-1",
+                "kind": "term",
+                "selected_index": 0,
+                "answer_index": 0,
+                "is_correct": True,
+                "explanation": "설명",
+            }
+        ],
+    )
+
+    result = await get_issue_quiz_result(82, user_id=7, db=_SavedQuizDB(activity))
+
+    assert result.correct_count == 2
+    assert result.results[0].quiz_id == "quiz-1"
+
+
+@pytest.mark.asyncio
 async def test_get_issue_quiz_not_ready_returns_404():
     with pytest.raises(Exception) as exc:
         await get_issue_quiz(82, _QuizDB(quizzes=[]))
@@ -191,6 +249,24 @@ def test_quiz_output_requires_fixed_kind_order():
 class _QuizDB:
     def __init__(self, quizzes=None):
         self.row = SimpleNamespace(id=82, quizzes=_quizzes() if quizzes is None else quizzes)
+        self.committed = False
+        self.commit_count = 0
+        self.executed = False
 
     async def get(self, _model, issue_id):
         return self.row if issue_id == 82 else None
+
+    async def execute(self, _stmt):
+        self.executed = True
+
+    async def commit(self):
+        self.committed = True
+        self.commit_count += 1
+
+
+class _SavedQuizDB:
+    def __init__(self, activity):
+        self.activity = activity
+
+    async def scalar(self, _stmt):
+        return self.activity

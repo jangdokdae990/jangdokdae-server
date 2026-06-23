@@ -42,10 +42,17 @@ async def _targets(db, issue_id: int | None, limit: int, force: bool) -> list[Is
     ]
 
 
-async def run(*, issue_id: int | None, limit: int, dry_run: bool, force: bool) -> None:
+async def run(
+    *,
+    issue_id: int | None,
+    limit: int,
+    term_limit: int,
+    dry_run: bool,
+    force: bool,
+) -> None:
     async with AsyncSessionLocal() as db:
         rows = await _targets(db, issue_id, limit, force)
-    print(f"대상 issue_docent {len(rows)}건")
+    print(f"대상 issue_docent {len(rows)}건", flush=True)
 
     created = skipped = failed = 0
     for row in rows:
@@ -61,11 +68,17 @@ async def run(*, issue_id: int | None, limit: int, dry_run: bool, force: bool) -
                 .all()
             ) if terms and not force else set()
             for term in terms:
+                if term_limit > 0 and created + skipped + failed >= term_limit:
+                    print(
+                        f"요약: created={created} skipped={skipped} failed={failed}",
+                        flush=True,
+                    )
+                    return
                 if term in existing:
                     skipped += 1
                     continue
                 if dry_run:
-                    print(f"[dry-run] issue={row.id} term={term}")
+                    print(f"[dry-run] issue={row.id} term={term}", flush=True)
                     skipped += 1
                     continue
                 try:
@@ -87,13 +100,13 @@ async def run(*, issue_id: int | None, limit: int, dry_run: bool, force: bool) -
                     await db.execute(stmt)
                     await db.commit()
                     created += 1
-                    print(f"[created] {term}")
+                    print(f"[created] {term}", flush=True)
                 except Exception as exc:  # noqa: BLE001
                     await db.rollback()
                     failed += 1
                     logger.exception("dictionary backfill failed issue=%s term=%s", row.id, term)
-                    print(f"[failed] issue={row.id} term={term}: {exc}")
-    print(f"요약: created={created} skipped={skipped} failed={failed}")
+                    print(f"[failed] issue={row.id} term={term}: {exc}", flush=True)
+    print(f"요약: created={created} skipped={skipped} failed={failed}", flush=True)
 
 
 if __name__ == "__main__":
@@ -101,9 +114,16 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="dictionary_terms 백필")
     parser.add_argument("--issue-id", type=int, default=None)
     parser.add_argument("--limit", type=int, default=10, help="대상 issue_docent 수. 0=무제한")
+    parser.add_argument("--term-limit", type=int, default=0, help="처리할 용어 수. 0=무제한")
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--force", action="store_true", help="기존 용어도 재생성 시도")
     args = parser.parse_args()
     asyncio.run(
-        run(issue_id=args.issue_id, limit=args.limit, dry_run=args.dry_run, force=args.force)
+        run(
+            issue_id=args.issue_id,
+            limit=args.limit,
+            term_limit=args.term_limit,
+            dry_run=args.dry_run,
+            force=args.force,
+        )
     )

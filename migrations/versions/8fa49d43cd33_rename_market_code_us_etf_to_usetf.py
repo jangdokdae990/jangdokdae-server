@@ -9,15 +9,15 @@ Create Date: 2026-06-23 10:19:17.847206
 (``CompanyEntity.market == Market.code``) 두 컬럼을 함께 갱신해야 정합성이 깨지지 않는다.
 ``user_interest_markets``는 ``market_id`` FK라 코드 변경의 영향을 받지 않는다.
 """
-from typing import Sequence, Union
+
+from collections.abc import Sequence
 
 from alembic import op
 
-# revision identifiers, used by Alembic.
-revision: str = '8fa49d43cd33'
-down_revision: Union[str, Sequence[str], None] = 'f3a7c9d2e1b8'
-branch_labels: Union[str, Sequence[str], None] = None
-depends_on: Union[str, Sequence[str], None] = None
+revision: str = "8fa49d43cd33"
+down_revision: str | Sequence[str] | None = "f3a7c9d2e1b8"
+branch_labels: str | Sequence[str] | None = None
+depends_on: str | Sequence[str] | None = None
 
 
 def upgrade() -> None:

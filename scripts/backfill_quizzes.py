@@ -73,12 +73,12 @@ async def run(*, issue_id: int | None, limit: int, dry_run: bool, force: bool) -
     generator = QuizGenerator()
     async with AsyncSessionLocal() as db:
         targets = await _targets(db, issue_id, limit, force)
-    print(f"대상 issue_docent {len(targets)}건")
+    print(f"대상 issue_docent {len(targets)}건", flush=True)
 
     done = failed = skipped = 0
     for docent, analysis in targets:
         if dry_run:
-            print(f"[dry-run] issue={docent.id} title={docent.title}")
+            print(f"[dry-run] issue={docent.id} title={docent.title}", flush=True)
             skipped += 1
             continue
         try:
@@ -95,12 +95,12 @@ async def run(*, issue_id: int | None, limit: int, dry_run: bool, force: bool) -
                 )
                 await db.commit()
             done += 1
-            print(f"[done] issue={docent.id}")
+            print(f"[done] issue={docent.id}", flush=True)
         except Exception as exc:  # noqa: BLE001
             failed += 1
             logger.exception("quiz backfill failed issue=%s", docent.id)
-            print(f"[failed] issue={docent.id}: {exc}")
-    print(f"요약: done={done} skipped={skipped} failed={failed}")
+            print(f"[failed] issue={docent.id}: {exc}", flush=True)
+    print(f"요약: done={done} skipped={skipped} failed={failed}", flush=True)
 
 
 if __name__ == "__main__":

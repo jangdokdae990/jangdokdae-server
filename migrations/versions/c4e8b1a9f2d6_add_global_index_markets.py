@@ -9,17 +9,16 @@ code는 지수 식별자(<=10자)이고, CompanyEntity.market(EUROSTOXX/NIKKEI/H
 직접 매핑된다(app/db/queries.MARKET_CODE_TO_EXCHANGES). 종목은
 services/collector/global_index_company_collector.py가 별도 적재한다.
 """
-from typing import Sequence, Union
+
+from collections.abc import Sequence
 
 import sqlalchemy as sa
 from alembic import op
 
-# revision identifiers, used by Alembic.
 revision: str = "c4e8b1a9f2d6"
-down_revision: Union[str, Sequence[str], None] = "8fa49d43cd33"
-branch_labels: Union[str, Sequence[str], None] = None
-depends_on: Union[str, Sequence[str], None] = None
-
+down_revision: str | Sequence[str] | None = "8fa49d43cd33"
+branch_labels: str | Sequence[str] | None = None
+depends_on: str | Sequence[str] | None = None
 
 _markets = sa.table(
     "markets",
@@ -35,30 +34,27 @@ _markets = sa.table(
 # created_at은 서버 기본값(KST_NOW)에 맡긴다.
 _GLOBAL_MARKETS = [
     {
-        "code": "EUROSTOXX", "name_ko": "유로스톡스50",
-        "name_en": "EURO STOXX 50", "is_active": False,
+        "code": "EUROSTOXX",
+        "name_ko": "유로스톡스50",
+        "name_en": "EURO STOXX 50",
+        "is_active": False,
     },
     {"code": "NIKKEI", "name_ko": "닛케이225", "name_en": "Nikkei 225", "is_active": False},
     {"code": "HANGSENG", "name_ko": "항셍", "name_en": "Hang Seng", "is_active": False},
     {"code": "CSI300", "name_ko": "중국 CSI300", "name_en": "CSI 300", "is_active": False},
 ]
-
-_CODES = tuple(m["code"] for m in _GLOBAL_MARKETS)
+_CODES = tuple(market["code"] for market in _GLOBAL_MARKETS)
 
 
 def upgrade() -> None:
-    """글로벌 지수 4종 시장 추가."""
     op.bulk_insert(_markets, _GLOBAL_MARKETS)
 
 
 def downgrade() -> None:
-    """추가한 글로벌 지수 시장 제거. 참조 관심 행을 먼저 비운다(FK는 cascade가 아님)."""
     bind = op.get_bind()
-    market_ids = sa.table("markets", sa.column("id", sa.Integer), sa.column("code", sa.String))
-    ids = bind.execute(
-        sa.select(market_ids.c.id).where(market_ids.c.code.in_(_CODES))
-    ).scalars().all()
+    markets = sa.table("markets", sa.column("id", sa.Integer), sa.column("code", sa.String))
+    ids = bind.execute(sa.select(markets.c.id).where(markets.c.code.in_(_CODES))).scalars().all()
     if ids:
-        uim = sa.table("user_interest_markets", sa.column("market_id", sa.Integer))
-        bind.execute(sa.delete(uim).where(uim.c.market_id.in_(ids)))
-    bind.execute(sa.delete(_markets).where(_markets.c.code.in_(_CODES)))
+        interests = sa.table("user_interest_markets", sa.column("market_id", sa.Integer))
+        bind.execute(sa.delete(interests).where(interests.c.market_id.in_(ids)))
+    bind.execute(sa.delete(markets).where(markets.c.code.in_(_CODES)))
