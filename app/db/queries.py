@@ -6,7 +6,17 @@
 
 from datetime import date, datetime
 
-from sqlalchemy import ColumnElement, Text, any_, delete, or_, select, type_coerce, update
+from sqlalchemy import (
+    ColumnElement,
+    Text,
+    any_,
+    delete,
+    func,
+    or_,
+    select,
+    type_coerce,
+    update,
+)
 from sqlalchemy.dialects.postgresql import ARRAY as PG_ARRAY
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.exc import IntegrityError
@@ -15,6 +25,7 @@ from sqlalchemy.orm import InstrumentedAttribute
 
 from app.db.base import KST_NOW
 from app.db.orm_models.company_entity import CompanyEntity
+from app.db.orm_models.industry_group import IndustryGroup
 from app.db.orm_models.issue_docent import IssueDocent
 from app.db.orm_models.market import Market
 from app.db.orm_models.news import News
@@ -28,8 +39,15 @@ from app.db.orm_models.user_interest_company import UserInterestCompany
 from app.db.orm_models.user_interest_market import UserInterestMarket
 from app.db.orm_models.user_interest_sector import UserInterestSector
 
-# 온보딩 시장 코드 → CompanyEntity.market(거래소) 매핑. 국내만 데이터 보유.
-MARKET_CODE_TO_EXCHANGES: dict[str, tuple[str, ...]] = {"KR": ("KOSPI", "KOSDAQ")}
+# 온보딩 시장 코드 → CompanyEntity.market 매핑. 해외는 버킷 코드가 곧 market 값(identity).
+# GLOBAL(기타 해외)은 적재 종목이 없어 매핑을 비워 둔다(필터 시 빈 결과로 수렴).
+MARKET_CODE_TO_EXCHANGES: dict[str, tuple[str, ...]] = {
+    "KOSPI": ("KOSPI",),
+    "KOSDAQ": ("KOSDAQ",),
+    "NASDAQ": ("NASDAQ",),
+    "SP500": ("SP500",),
+    "US_ETF": ("US_ETF",),
+}
 
 
 def _escape_like(value: str) -> str:
@@ -75,6 +93,28 @@ async def save_news_embeddings(db: AsyncSession, id_to_vector: dict[int, list[fl
     return len(id_to_vector)
 
 
+async def get_latest_cluster_members(db: AsyncSession) -> tuple[dict[int, set[int]], int]:
+    """직전 클러스터링 상태를 cluster id 승계용으로 로드한다.
+
+    반환: ({stable_id → 멤버 news_id 집합}, 다음 신규 stable_id).
+    가장 최근 run_date의 stable_id 있는 행을 직전 클러스터로 보고, 다음 id는 전체 max+1로 둔다
+    (재사용 방지). 이력이 없으면 ({}, 1).
+    """
+    latest = (await db.execute(select(func.max(NewsCluster.run_date)))).scalar()
+    next_id = ((await db.execute(select(func.max(NewsCluster.stable_id)))).scalar() or 0) + 1
+    if latest is None:
+        return {}, next_id
+    rows = (
+        await db.execute(
+            select(NewsCluster.stable_id, NewsCluster.member_news_ids)
+            .where(NewsCluster.run_date == latest)
+            .where(NewsCluster.stable_id.is_not(None))
+        )
+    ).all()
+    prev = {int(sid): set(members) for sid, members in rows}
+    return prev, next_id
+
+
 async def save_chunk_embeddings(db: AsyncSession, id_to_vector: dict[int, list[float]]) -> int:
     """사업보고서 청크 임베딩을 id별로 일괄 저장. 저장 건수를 반환(빈 입력은 0)."""
     if not id_to_vector:
@@ -103,6 +143,14 @@ async def get_clusterable_news(db: AsyncSession, since: datetime) -> list[News]:
         .order_by(News.id)
     )
     return list(result.scalars().all())
+
+
+async def count_recent_news(db: AsyncSession, since: datetime) -> int:
+    """since(KST naive) 이후 수집된 news 행 수 — SPOF 일 수집량 계기판(설계 00 §11.5)."""
+    result = await db.execute(
+        select(func.count()).select_from(News).where(News.created_at >= since)
+    )
+    return int(result.scalar() or 0)
 
 
 # ── 분석 단계(NewsAnalyzer, →10) 핸드오프 ──────────────────────────────
@@ -496,25 +544,40 @@ async def get_all_sectors(db: AsyncSession) -> list[Sector]:
     return list(result.scalars().all())
 
 
+async def get_sector_industry_groups(db: AsyncSession) -> dict[int, list[str]]:
+    """섹터 id → 하위 산업그룹 이름 목록 — 온보딩 섹터 카드의 예시 표시용."""
+    rows = await db.execute(
+        select(IndustryGroup.sector_id, IndustryGroup.name_ko).order_by(IndustryGroup.id)
+    )
+    mapping: dict[int, list[str]] = {}
+    for sector_id, name in rows.all():
+        mapping.setdefault(sector_id, []).append(name)
+    return mapping
+
+
 async def search_companies(
     db: AsyncSession,
     sector_id: int | None,
-    market_code: str | None,
+    market_codes: tuple[str, ...] | None,
     q: str | None,
     limit: int,
     cursor: int | None,
 ) -> list[CompanyEntity]:
     """활성 종목을 필터·검색·커서 페이지네이션으로 조회.
 
-    market_code(국내=KR)는 거래소(KOSPI/KOSDAQ)로 풀어 필터한다. cursor는 직전 페이지
-    마지막 id로, id 오름차순에서 그 다음부터 limit개를 가져온다.
+    market_codes(다중 선택 가능)는 각 코드를 거래소(KOSPI/KOSDAQ/NASDAQ/SP500/US_ETF)로 풀어
+    합집합 필터한다. cursor는 직전 페이지 마지막 id로, id 오름차순에서 그 다음부터 limit개.
     """
     stmt = select(CompanyEntity).where(CompanyEntity.is_active.is_(True))
     if sector_id is not None:
         stmt = stmt.where(CompanyEntity.sector_id == sector_id)
-    if market_code is not None:
-        exchanges = MARKET_CODE_TO_EXCHANGES.get(market_code, ())
-        # 매핑 없는 시장(해외 등)은 보유 데이터가 없어 빈 결과로 수렴시킨다.
+    if market_codes:
+        exchanges = [
+            exch
+            for code in market_codes
+            for exch in MARKET_CODE_TO_EXCHANGES.get(code, ())
+        ]
+        # 매핑 없는 시장(GLOBAL 등)만 선택되면 빈 결과로 수렴(in_([]) → no rows).
         stmt = stmt.where(CompanyEntity.market.in_(exchanges))
     if q:
         escaped = _escape_like(q)

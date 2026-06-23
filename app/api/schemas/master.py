@@ -10,6 +10,8 @@ class MarketOut(ORMSchema):
     code: str
     name_ko: str
     name_en: str
+    description: str | None
+    tags: list[str]
 
 
 class SectorOut(ORMSchema):
@@ -18,6 +20,7 @@ class SectorOut(ORMSchema):
     name_en: str
     wics_code: str
     gics_code: str
+    industry_groups: list[str] = []  # 하위 산업그룹 이름(온보딩 카드 예시)
 
 
 class CompanyOut(ORMSchema):
