@@ -37,7 +37,7 @@
 설계 결정 두 가지:
 
 - **비정규화**: sector/company id는 `news_analysis`에도 있지만, 피드는 `issue_docent`를 직접 조회하므로 조인을 피하기 위해 같은 값을 `issue_docent`에도 저장한다. `news_analysis`의 컬럼·인덱스 패턴을 그대로 미러링한다.
-- **market은 종목 거래소 기반**: 실제 `markets` 마스터는 거래소·지수 단위(`KOSPI`·`KOSDAQ`·`NASDAQ`·`SP500`·`US_ETF`·`GLOBAL`)다. 종목은 자신의 거래소를 `CompanyEntity.market`(KOSPI/KOSDAQ)으로 알고 있으므로, 이슈에 연관된 종목의 거래소를 `markets.code`와 일치시켜 시장을 해소한다. 종목 유니버스가 국내뿐이라 종목 기반은 KOSPI/KOSDAQ로 수렴하고, **종목으로 못 잡는 해외 이슈는 `GLOBAL`(기타 해외 시장)로 폴백**한다. 국내인데 종목이 없는 이슈(scope=`시장 전체`)는 빈 값으로 둔다(불확실한 시장을 억지로 붙이지 않음).
+- **market은 종목 거래소 기반**: 실제 `markets` 마스터는 거래소·지수 단위(`KOSPI`·`KOSDAQ`·`NASDAQ`·`SP500`·`USETF`·`GLOBAL`)다. 종목은 자신의 거래소를 `CompanyEntity.market`(KOSPI/KOSDAQ)으로 알고 있으므로, 이슈에 연관된 종목의 거래소를 `markets.code`와 일치시켜 시장을 해소한다. 종목 유니버스가 국내뿐이라 종목 기반은 KOSPI/KOSDAQ로 수렴하고, **종목으로 못 잡는 해외 이슈는 `GLOBAL`(기타 해외 시장)로 폴백**한다. 국내인데 종목이 없는 이슈(scope=`시장 전체`)는 빈 값으로 둔다(불확실한 시장을 억지로 붙이지 않음).
 
 ## 3. 데이터 모델
 
@@ -104,7 +104,7 @@ classify (origin·sector_tags·company_tags)
 ## 9. 후속 과제
 
 - 피드 조회 쿼리·API에서 `user_interest_*`와 `issue_docent.{market,sector,company}_ids`를 `&&`(배열 겹침)으로 매칭하는 엔드포인트 구현.
-- 해외 종목 데이터가 들어오기 전까지 해외 이슈는 `GLOBAL` 하나로만 태깅된다 — NASDAQ·SP500·US_ETF로 세분 태깅하려면 해외 종목 유니버스 또는 분류 단계의 시장 식별 출력이 필요하다.
+- 해외 종목 데이터가 들어오기 전까지 해외 이슈는 `GLOBAL` 하나로만 태깅된다 — NASDAQ·SP500·USETF로 세분 태깅하려면 해외 종목 유니버스 또는 분류 단계의 시장 식별 출력이 필요하다.
 - **온보딩 정합성**: market 택소노미(6-종 reseed)·`search_companies`의 `MARKET_CODE_TO_EXCHANGES`(KOSPI/KOSDAQ) 정합은 main에서 이미 처리됨 — `resolve_market_ids`는 그 위에서 `CompanyEntity.market == Market.code` 조인으로 동작.
 - LLM 제목 품질 평가(원문 복사율·금지 표현·길이) 지표화.
 

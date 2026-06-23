@@ -4,6 +4,7 @@
 부분 실패 후 재실행해도 남은 것만 처리된다(멱등).
 """
 
+import re
 from datetime import date, datetime
 
 from sqlalchemy import (
@@ -46,8 +47,39 @@ MARKET_CODE_TO_EXCHANGES: dict[str, tuple[str, ...]] = {
     "KOSDAQ": ("KOSDAQ",),
     "NASDAQ": ("NASDAQ",),
     "SP500": ("SP500",),
-    "US_ETF": ("US_ETF",),
+    "USETF": ("USETF",),
+    "EUROSTOXX": ("EUROSTOXX",),
+    "NIKKEI": ("NIKKEI",),
+    "HANGSENG": ("HANGSENG",),
+    "CSI300": ("CSI300",),
 }
+
+
+def _normalize_market_code(token: str) -> str:
+    """시장 코드 정규화 — 대소문자·구분자(공백/하이픈/언더스코어) 흔들림을 흡수한다.
+
+    구분자를 모두 제거하고 대문자화해 'US ETF'·'us-etf'·구(舊) 'US_ETF'를 모두 정식 코드
+    'USETF'로 수렴시킨다. 시장 코드는 전부 구분자 없는 형태(KOSPI·SP500·USETF…)로 통일했으므로,
+    클라이언트 표기 흔들림이 빈 결과로 빠지지 않게 막는 안전망이다.
+    """
+    return re.sub(r"[\s_-]+", "", token.strip()).upper()
+
+
+# 정규화 키 → 정식 코드. 표기 흔들림(소문자·'US ETF' 등)을 정식 코드로 되돌린다.
+_NORMALIZED_TO_MARKET_CODE: dict[str, str] = {
+    _normalize_market_code(code): code for code in MARKET_CODE_TO_EXCHANGES
+}
+
+
+def _resolve_market_exchanges(market_codes: tuple[str, ...]) -> list[str]:
+    """시장 코드(다중)를 거래소 목록으로 해소. 표기 흔들림은 정규화로 흡수하고,
+    매핑 없는 코드(GLOBAL·미상)는 버려 빈 결과로 수렴시킨다(억지 매칭 금지)."""
+    exchanges: list[str] = []
+    for code in market_codes:
+        canonical = _NORMALIZED_TO_MARKET_CODE.get(_normalize_market_code(code))
+        if canonical:
+            exchanges.extend(MARKET_CODE_TO_EXCHANGES[canonical])
+    return exchanges
 
 def _escape_like(value: str) -> str:
     """LIKE 메타문자(\\,%,_)를 이스케이프 — 사용자 입력이 와일드카드로 해석되지 않게 한다.
@@ -603,19 +635,15 @@ async def search_companies(
 ) -> list[CompanyEntity]:
     """활성 종목을 필터·검색·커서 페이지네이션으로 조회.
 
-    market_codes(다중 선택 가능)는 각 코드를 거래소(KOSPI/KOSDAQ/NASDAQ/SP500/US_ETF)로 풀어
+    market_codes(다중 선택 가능)는 각 코드를 거래소(KOSPI/KOSDAQ/NASDAQ/SP500/USETF)로 풀어
     합집합 필터한다. cursor는 직전 페이지 마지막 id로, id 오름차순에서 그 다음부터 limit개.
     """
     stmt = select(CompanyEntity).where(CompanyEntity.is_active.is_(True))
     if sector_id is not None:
         stmt = stmt.where(CompanyEntity.sector_id == sector_id)
     if market_codes:
-        exchanges = [
-            exch
-            for code in market_codes
-            for exch in MARKET_CODE_TO_EXCHANGES.get(code, ())
-        ]
         # 매핑 없는 시장(GLOBAL 등)만 선택되면 빈 결과로 수렴(in_([]) → no rows).
+        exchanges = _resolve_market_exchanges(market_codes)
         stmt = stmt.where(CompanyEntity.market.in_(exchanges))
     if q:
         escaped = _escape_like(q)
